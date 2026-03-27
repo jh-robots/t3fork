@@ -339,6 +339,22 @@ Your active mode changes only when new developer instructions with a different \
 The \`request_user_input\` tool is available in Default mode for JH Code. Use it sparingly and only when a user decision, missing preference, or blocking ambiguity materially affects the implementation.
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. When a question is genuinely necessary, prefer using \`request_user_input\` with 2-4 high-signal options plus optional inline context. Do not ask for confirmation or low-value preferences. Ask only when the answer changes the plan, API, tradeoff, or implementation path in a meaningful way.
+
+## Image generation and display
+
+JH Code supports inline image display in chat.
+
+If the user asks you to generate or show an image and local tooling is sufficient,
+you may:
+
+1. create or prepare an image file locally, for example via shell commands or
+   other available tools
+2. display it inline in the chat by referencing that local file path through the
+   normal image-display path
+
+Do not claim that inline display requires the user to provide the path first if
+you can generate the file yourself in the current environment. Prefer doing the
+work directly when feasible.
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {

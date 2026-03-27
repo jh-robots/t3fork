@@ -22,6 +22,8 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CircleSlashIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -802,40 +804,94 @@ const UserInputHistoryCard = memo(function UserInputHistoryCard(props: {
   );
 });
 
+const CollapsibleInlineImage = memo(function CollapsibleInlineImage(props: {
+  src: string;
+  alt: string;
+  className: string;
+  onClick: () => void;
+  onImageLoad: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const ToggleIcon = collapsed ? ChevronRightIcon : ChevronDownIcon;
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="mb-2 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-[11px] font-medium text-muted-foreground/80 transition-colors hover:text-foreground/85"
+        onClick={() => setCollapsed((existing) => !existing)}
+        aria-expanded={!collapsed}
+      >
+        <ToggleIcon className="size-3.5" />
+        {collapsed ? "Show image" : "Hide image"}
+      </button>
+      {!collapsed ? (
+        <img
+          src={props.src}
+          alt={props.alt}
+          title={`${props.alt} - click to expand`}
+          className={props.className}
+          onClick={props.onClick}
+          onLoad={props.onImageLoad}
+          onError={props.onImageLoad}
+        />
+      ) : null}
+    </div>
+  );
+});
+
 const TimelineImageGrid = memo(function TimelineImageGrid(props: {
   images: NonNullable<TimelineMessage["attachments"]>;
   className?: string;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onImageLoad: () => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const ToggleIcon = collapsed ? ChevronRightIcon : ChevronDownIcon;
+
   return (
-    <div className={cn("grid grid-cols-2 gap-2", props.className)}>
-      {props.images.map((image) => (
-        <div
-          key={image.id}
-          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-        >
-          {image.previewUrl ? (
-            <img
-              src={image.previewUrl}
-              alt={image.name}
-              title={`${image.name} - click to expand`}
-              className="h-full max-h-[220px] w-full cursor-zoom-in object-cover"
-              onClick={() => {
-                const preview = buildExpandedImagePreview(props.images, image.id);
-                if (!preview) return;
-                props.onImageExpand(preview);
-              }}
-              onLoad={props.onImageLoad}
-              onError={props.onImageLoad}
-            />
-          ) : (
-            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-              {image.name}
+    <div className={props.className}>
+      <button
+        type="button"
+        className="mb-2 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-[11px] font-medium text-muted-foreground/80 transition-colors hover:text-foreground/85"
+        onClick={() => setCollapsed((existing) => !existing)}
+        aria-expanded={!collapsed}
+      >
+        <ToggleIcon className="size-3.5" />
+        {collapsed
+          ? `Show images (${props.images.length})`
+          : `Hide images (${props.images.length})`}
+      </button>
+      {!collapsed ? (
+        <div className="grid grid-cols-2 gap-2">
+          {props.images.map((image) => (
+            <div
+              key={image.id}
+              className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+            >
+              {image.previewUrl ? (
+                <img
+                  src={image.previewUrl}
+                  alt={image.name}
+                  title={`${image.name} - click to expand`}
+                  className="h-full max-h-[220px] w-full cursor-zoom-in object-cover"
+                  onClick={() => {
+                    const preview = buildExpandedImagePreview(props.images, image.id);
+                    if (!preview) return;
+                    props.onImageExpand(preview);
+                  }}
+                  onLoad={props.onImageLoad}
+                  onError={props.onImageLoad}
+                />
+              ) : (
+                <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                  {image.name}
+                </div>
+              )}
             </div>
-          )}
+          ))}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 });
@@ -1073,10 +1129,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       </div>
       {imageSrc ? (
         <div className="mt-2 pl-6">
-          <img
+          <CollapsibleInlineImage
             src={imageSrc}
             alt={workEntry.imagePath ?? heading}
-            title={`${workEntry.imagePath ?? heading} - click to expand`}
             className="block max-h-[220px] max-w-[320px] cursor-zoom-in rounded-lg border border-border/70 bg-background object-contain shadow-sm"
             onClick={() =>
               props.onImageExpand({
@@ -1084,8 +1139,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 index: 0,
               })
             }
-            onLoad={props.onImageLoad}
-            onError={props.onImageLoad}
+            onImageLoad={props.onImageLoad}
           />
         </div>
       ) : null}

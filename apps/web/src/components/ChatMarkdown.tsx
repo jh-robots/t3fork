@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
   Suspense,
@@ -315,19 +315,12 @@ function ChatMarkdown({
         const resolvedSrc = resolveInlineImageSrc(src);
 
         return (
-          <img
-            {...props}
+          <MarkdownInlineImage
             src={resolvedSrc}
             alt={imageName}
             title={onImageOpen ? `${imageName} - click to expand` : imageName}
-            className="mt-2 block min-h-[180px] max-h-[320px] max-w-full cursor-zoom-in rounded-lg border border-border/70 bg-background object-contain shadow-sm"
-            onClick={(event) => {
-              props.onClick?.(event);
-              if (event.defaultPrevented || !onImageOpen) {
-                return;
-              }
-              onImageOpen({ src: resolvedSrc, name: imageName });
-            }}
+            {...(onImageOpen ? { onImageOpen } : {})}
+            {...(props.onClick ? { onClick: props.onClick } : {})}
           />
         );
       },
@@ -343,5 +336,45 @@ function ChatMarkdown({
     </div>
   );
 }
+
+const MarkdownInlineImage = memo(function MarkdownInlineImage(props: {
+  src: string;
+  alt: string;
+  title: string;
+  onImageOpen?: (image: { src: string; name: string }) => void;
+  onClick?: React.ImgHTMLAttributes<HTMLImageElement>["onClick"];
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const ToggleIcon = collapsed ? ChevronRightIcon : ChevronDownIcon;
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        className="mb-2 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-[11px] font-medium text-muted-foreground/80 transition-colors hover:text-foreground/85"
+        onClick={() => setCollapsed((existing) => !existing)}
+        aria-expanded={!collapsed}
+      >
+        <ToggleIcon className="size-3.5" />
+        {collapsed ? "Show image" : "Hide image"}
+      </button>
+      {!collapsed ? (
+        <img
+          src={props.src}
+          alt={props.alt}
+          title={props.title}
+          className="block min-h-[180px] max-h-[320px] max-w-full cursor-zoom-in rounded-lg border border-border/70 bg-background object-contain shadow-sm"
+          onClick={(event) => {
+            props.onClick?.(event);
+            if (event.defaultPrevented || !props.onImageOpen) {
+              return;
+            }
+            props.onImageOpen({ src: props.src, name: props.alt });
+          }}
+        />
+      ) : null}
+    </div>
+  );
+});
 
 export default memo(ChatMarkdown);

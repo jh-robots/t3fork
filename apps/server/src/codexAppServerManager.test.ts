@@ -545,6 +545,15 @@ describe("sendTurn", () => {
     });
   });
 
+  it("documents local image generation and inline display in default mode instructions", () => {
+    expect(CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS).toContain(
+      "JH Code supports inline image display in chat.",
+    );
+    expect(CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS).toContain(
+      "Do not claim that inline display requires the user to provide the path first",
+    );
+  });
+
   it("keeps the session model when interaction mode is set without an explicit model", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
     context.session.model = "gpt-5.2-codex";

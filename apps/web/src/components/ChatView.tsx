@@ -93,17 +93,17 @@ import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import {
-  BotIcon,
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
+  import {
+    BotIcon,
+    ChevronDownIcon,
+    ChevronLeftIcon,
+    ChevronRightIcon,
   CircleAlertIcon,
   ListTodoIcon,
-  LockIcon,
-  LockOpenIcon,
-  XIcon,
-} from "lucide-react";
+    LockIcon,
+    LockOpenIcon,
+    XIcon,
+  } from "lucide-react";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -4275,34 +4275,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
             aria-label="Close image preview"
             onClick={closeExpandedImage}
           />
-          {expandedImage.images.length > 1 && (
-            <Button
-              type="button"
-              size="icon"
+            {expandedImage.images.length > 1 && (
+              <Button
+                type="button"
+                size="icon"
               variant="ghost"
               className="absolute left-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:left-6"
               aria-label="Previous image"
               onClick={() => {
                 navigateExpandedImage(-1);
               }}
-            >
-              <ChevronLeftIcon className="size-5" />
-            </Button>
-          )}
-          <div className="relative isolate z-10 max-h-[92vh] max-w-[92vw]">
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              className="absolute right-2 top-2"
-              onClick={closeExpandedImage}
-              aria-label="Close image preview"
-            >
-              <XIcon />
-            </Button>
-            <img
-              src={expandedImageItem.src}
-              alt={expandedImageItem.name}
+              >
+                <ChevronLeftIcon className="size-5" />
+              </Button>
+            )}
+            <div className="relative isolate z-10 max-h-[92vh] max-w-[92vw]">
+              <img
+                src={expandedImageItem.src}
+                alt={expandedImageItem.name}
               className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
               draggable={false}
               onClick={closeExpandedImage}
