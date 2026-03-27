@@ -37,6 +37,7 @@ export interface WorkLogEntry {
   createdAt: string;
   label: string;
   detail?: string;
+  imagePath?: string;
   command?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
@@ -61,6 +62,14 @@ export interface PendingUserInput {
   requestId: ApprovalRequestId;
   createdAt: string;
   questions: ReadonlyArray<UserInputQuestion>;
+}
+
+export interface UserInputHistoryEntry {
+  id: string;
+  requestId: ApprovalRequestId;
+  createdAt: string;
+  questions: ReadonlyArray<UserInputQuestion>;
+  answers: Record<string, string>;
 }
 
 export interface ActivePlanState {
@@ -101,6 +110,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "user-input";
+      createdAt: string;
+      userInput: UserInputHistoryEntry;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -333,6 +348,63 @@ export function derivePendingUserInputs(
   );
 }
 
+export function deriveResolvedUserInputHistory(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): UserInputHistoryEntry[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const requestedByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
+  const resolvedEntries: UserInputHistoryEntry[] = [];
+
+  for (const activity of ordered) {
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId =
+      payload && typeof payload.requestId === "string"
+        ? ApprovalRequestId.makeUnsafe(payload.requestId)
+        : null;
+
+    if (activity.kind === "user-input.requested" && requestId) {
+      const questions = parseUserInputQuestions(payload);
+      if (!questions) {
+        continue;
+      }
+      requestedByRequestId.set(requestId, {
+        requestId,
+        createdAt: activity.createdAt,
+        questions,
+      });
+      continue;
+    }
+
+    if (activity.kind === "user-input.resolved" && requestId) {
+      const requested = requestedByRequestId.get(requestId);
+      const rawAnswers =
+        payload?.answers && typeof payload.answers === "object"
+          ? (payload.answers as Record<string, unknown>)
+          : null;
+      if (!requested || !rawAnswers) {
+        continue;
+      }
+      const answers = Object.fromEntries(
+        Object.entries(rawAnswers)
+          .map(([questionId, value]) => [questionId, asTrimmedString(value)])
+          .filter((entry): entry is [string, string] => entry[1] !== null),
+      );
+      resolvedEntries.push({
+        id: `user-input:${requestId}:${activity.createdAt}`,
+        requestId,
+        createdAt: activity.createdAt,
+        questions: requested.questions,
+        answers,
+      });
+    }
+  }
+
+  return resolvedEntries;
+}
+
 export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
@@ -510,6 +582,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (command) {
     entry.command = command;
   }
+  const imagePath = extractWorkLogImagePath(payload);
+  if (imagePath) {
+    entry.imagePath = imagePath;
+  }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
@@ -666,6 +742,16 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
+}
+
+function extractWorkLogImagePath(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  return (
+    asTrimmedString(item?.path) ??
+    asTrimmedString(data?.path) ??
+    (payload?.itemType === "image_view" ? asTrimmedString(payload?.detail) : null)
+  );
 }
 
 function stripTrailingExitCode(value: string): {
@@ -828,6 +914,7 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  userInputEntries: UserInputHistoryEntry[],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -847,7 +934,13 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  const userInputRows: TimelineEntry[] = userInputEntries.map((userInput) => ({
+    id: userInput.id,
+    kind: "user-input",
+    createdAt: userInput.createdAt,
+    userInput,
+  }));
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...userInputRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

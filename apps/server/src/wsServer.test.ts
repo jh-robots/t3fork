@@ -1618,6 +1618,51 @@ describe("WebSocket Server", () => {
     );
   });
 
+  it("serves local image files through the proxy route", async () => {
+    const imageDir = makeTempDir("t3code-ws-local-image-");
+    const imagePath = path.join(imageDir, "inline-demo.png");
+    fs.writeFileSync(
+      imagePath,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(
+      port,
+      `/local-file?path=${encodeURIComponent(imagePath)}`,
+    );
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("serves slash-prefixed windows local image paths through the proxy route", async () => {
+    const imageDir = makeTempDir("t3code-ws-local-image-win-");
+    const imagePath = path.join(imageDir, "inline-demo.png");
+    fs.writeFileSync(
+      imagePath,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const slashPrefixedPath = `/${imagePath.replaceAll("\\", "/")}`;
+    const response = await requestPath(
+      port,
+      `/local-file?path=${encodeURIComponent(slashPrefixedPath)}`,
+    );
+    expect(response.statusCode).toBe(200);
+  });
+
   it("rejects projects.writeFile paths outside the workspace root", async () => {
     const workspace = makeTempDir("t3code-ws-write-file-reject-");
 

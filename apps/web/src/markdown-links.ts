@@ -57,6 +57,10 @@ function parseFileUrlHref(href: string): { path: string; hash: string } | null {
   }
 }
 
+function normalizeWindowsAbsolutePath(path: string): string {
+  return /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
+}
+
 function looksLikePosixFilesystemPath(path: string): boolean {
   if (!path.startsWith("/")) return false;
   if (POSIX_FILE_ROOT_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
@@ -110,7 +114,9 @@ export function resolveMarkdownFileLinkTarget(
     ? parseFileUrlHref(rawHref)
     : null;
   const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
-  const decodedPath = fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim());
+  const decodedPath = normalizeWindowsAbsolutePath(
+    fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim()),
+  );
   const decodedHash = safeDecode(source.hash.trim());
 
   if (decodedPath.length === 0) return null;

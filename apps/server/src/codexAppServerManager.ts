@@ -336,9 +336,9 @@ Your active mode changes only when new developer instructions with a different \
 
 ## request_user_input availability
 
-The \`request_user_input\` tool is unavailable in Default mode. If you call it while in Default mode, it will return an error.
+The \`request_user_input\` tool is available in Default mode for JH Code. Use it sparingly and only when a user decision, missing preference, or blocking ambiguity materially affects the implementation.
 
-In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
+In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. When a question is genuinely necessary, prefer using \`request_user_input\` with 2-4 high-signal options plus optional inline context. Do not ask for confirmation or low-value preferences. Ask only when the answer changes the plan, API, tradeoff, or implementation path in a meaningful way.
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
@@ -433,8 +433,13 @@ function buildCodexCollaborationMode(input: {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
+  // JH Code uses Codex's ask-user-capable collaboration lane even for default
+  // interaction mode because the runtime rejects request_user_input in the
+  // stock default lane. We keep distinct default-vs-plan instructions while
+  // reusing the plan transport capability underneath.
+  const collaborationPresetMode = input.interactionMode === "plan" ? "plan" : "plan";
   return {
-    mode: input.interactionMode,
+    mode: collaborationPresetMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",

@@ -46,4 +46,10 @@ describe("resolveMarkdownFileLinkTarget", () => {
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
   });
+
+  it("treats slash-prefixed windows absolute paths as file links", () => {
+    expect(resolveMarkdownFileLinkTarget("/C:/Windows/Temp/inline-response-test.png")).toBe(
+      "C:/Windows/Temp/inline-response-test.png",
+    );
+  });
 });

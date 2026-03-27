@@ -8,6 +8,13 @@ import {
 } from "@t3tools/contracts";
 import { decodeUnknownJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 import { Result, Schema } from "effect";
+import {
+  BACKEND_TARGET_STORAGE_KEY,
+  BackendTarget,
+  DEFAULT_BACKEND_TARGET,
+  resolveBackendTargetWsUrl,
+} from "./backendTarget";
+import { getLocalStorageItem } from "./hooks/useLocalStorage";
 
 type PushListener<C extends WsPushChannel> = (message: WsPushMessage<C>) => void;
 
@@ -64,15 +71,17 @@ export class WsTransport {
   private readonly url: string;
 
   constructor(url?: string) {
+    const configuredTarget =
+      getLocalStorageItem(BACKEND_TARGET_STORAGE_KEY, BackendTarget) ?? DEFAULT_BACKEND_TARGET;
     const bridgeUrl = window.desktopBridge?.getWsUrl();
     const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
     this.url =
       url ??
       (bridgeUrl && bridgeUrl.length > 0
         ? bridgeUrl
-        : envUrl && envUrl.length > 0
+        : envUrl && envUrl.length > 0 && window.nativeApi !== undefined
           ? envUrl
-          : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:${window.location.port}`);
+          : resolveBackendTargetWsUrl(configuredTarget));
     this.connect();
   }
 

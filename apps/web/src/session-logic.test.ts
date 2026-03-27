@@ -1,4 +1,5 @@
 import {
+  ApprovalRequestId,
   EventId,
   MessageId,
   ThreadId,
@@ -741,6 +742,30 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("extracts image paths for image-view tool activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "image-view-tool",
+        kind: "tool.completed",
+        summary: "Image view",
+        payload: {
+          itemType: "image_view",
+          data: {
+            item: {
+              path: "C:\\Windows\\Temp\\inline-proof.png",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      itemType: "image_view",
+      imagePath: "C:\\Windows\\Temp\\inline-proof.png",
+    });
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -952,6 +977,7 @@ describe("deriveTimelineEntries", () => {
           tone: "tool",
         },
       ],
+      [],
     );
 
     expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
@@ -961,6 +987,43 @@ describe("deriveTimelineEntries", () => {
         planMarkdown: "# Ship it",
         implementedAt: null,
         implementationThreadId: null,
+      },
+    });
+  });
+
+  it("includes resolved ask-user history entries in chronological order", () => {
+    const entries = deriveTimelineEntries(
+      [],
+      [],
+      [],
+      [
+        {
+          id: "user-input:req-1",
+          requestId: ApprovalRequestId.makeUnsafe("req-1"),
+          createdAt: "2026-02-23T00:00:01.000Z",
+          questions: [
+            {
+              id: "path",
+              header: "Path",
+              question: "Which path?",
+              options: [{ label: "Apply recommendation", description: "Do the suggested thing" }],
+            },
+          ],
+          answers: {
+            path: "Apply recommendation",
+          },
+        },
+      ],
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user-input"]);
+    expect(entries[0]).toMatchObject({
+      kind: "user-input",
+      userInput: {
+        requestId: "req-1",
+        answers: {
+          path: "Apply recommendation",
+        },
       },
     });
   });

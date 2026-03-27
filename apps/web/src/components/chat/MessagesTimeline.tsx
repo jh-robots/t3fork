@@ -22,11 +22,13 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  CircleSlashIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
   type LucideIcon,
+  MessageSquareTextIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -48,6 +50,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { resolveInlineImageSrc } from "~/backendOrigin";
 import { type TimestampFormat } from "../../appSettings";
 import { formatTimestamp } from "../../timestampFormat";
 import {
@@ -58,6 +61,7 @@ import {
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
+const INLINE_MEDIA_MARKDOWN_PATTERN = /!\[[^\]]*]\([^)]+\)/;
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
@@ -175,6 +179,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         continue;
       }
 
+      if (timelineEntry.kind === "user-input") {
+        nextRows.push({
+          kind: "user-input",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          userInput: timelineEntry.userInput,
+        });
+        continue;
+      }
+
       nextRows.push({
         kind: "message",
         id: timelineEntry.id,
@@ -237,10 +251,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return Math.min(firstCurrentTurnRowIndex, firstTailRowIndex);
   }, [activeTurnInProgress, activeTurnStartedAt, rows]);
 
-  const virtualizedRowCount = clamp(firstUnvirtualizedRowIndex, {
-    minimum: 0,
-    maximum: rows.length,
-  });
+  const hasInlineMediaRows = useMemo(
+    () =>
+      rows.some(
+        (row) =>
+          (row.kind === "message" &&
+            ((row.message.attachments?.length ?? 0) > 0 ||
+              (row.message.role === "assistant" &&
+                INLINE_MEDIA_MARKDOWN_PATTERN.test(row.message.text)))) ||
+          (row.kind === "work" && row.groupedEntries.some((entry) => Boolean(entry.imagePath))),
+      ),
+    [rows],
+  );
+
+  const virtualizedRowCount = hasInlineMediaRows
+    ? 0
+    : clamp(firstUnvirtualizedRowIndex, {
+        minimum: 0,
+        maximum: rows.length,
+      });
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
@@ -252,6 +281,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (!row) return 96;
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "user-input") return 176;
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
     },
@@ -276,12 +306,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [rowVirtualizer]);
   const pendingMeasureFrameRef = useRef<number | null>(null);
   const onTimelineImageLoad = useCallback(() => {
+    if (virtualizedRowCount === 0) return;
     if (pendingMeasureFrameRef.current !== null) return;
     pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = null;
       rowVirtualizer.measure();
     });
-  }, [rowVirtualizer]);
+  }, [rowVirtualizer, virtualizedRowCount]);
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
@@ -302,6 +333,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       [turnId]: !(current[turnId] ?? true),
     }));
   }, []);
+  const onOpenMarkdownImage = useCallback(
+    (image: { src: string; name: string }) => {
+      onImageExpand({
+        images: [image],
+        index: 0,
+      });
+    },
+    [onImageExpand],
+  );
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -345,7 +385,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               )}
               <div className="space-y-0.5">
                 {visibleEntries.map((workEntry) => (
-                  <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
+                  <SimpleWorkEntryRow
+                    key={`work-row:${workEntry.id}`}
+                    workEntry={workEntry}
+                    onImageExpand={onImageExpand}
+                    onImageLoad={onTimelineImageLoad}
+                  />
                 ))}
               </div>
             </div>
@@ -363,41 +408,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             <div className="flex justify-end">
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
                 {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                        <div
-                          key={image.id}
-                          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                        >
-                          {image.previewUrl ? (
-                            <button
-                              type="button"
-                              className="h-full w-full cursor-zoom-in"
-                              aria-label={`Preview ${image.name}`}
-                              onClick={() => {
-                                const preview = buildExpandedImagePreview(userImages, image.id);
-                                if (!preview) return;
-                                onImageExpand(preview);
-                              }}
-                            >
-                              <img
-                                src={image.previewUrl}
-                                alt={image.name}
-                                className="h-full max-h-[220px] w-full object-cover"
-                                onLoad={onTimelineImageLoad}
-                                onError={onTimelineImageLoad}
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                              {image.name}
-                            </div>
-                          )}
-                        </div>
-                      ),
-                    )}
-                  </div>
+                  <TimelineImageGrid
+                    images={userImages}
+                    className="mb-2 max-w-[420px]"
+                    onImageExpand={onImageExpand}
+                    onImageLoad={onTimelineImageLoad}
+                  />
                 )}
                 {(displayedUserMessage.visibleText.trim().length > 0 ||
                   terminalContexts.length > 0) && (
@@ -437,6 +453,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const assistantImages = row.message.attachments ?? [];
           return (
             <>
               {row.showCompletionDivider && (
@@ -449,10 +466,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
+                {assistantImages.length > 0 && (
+                  <TimelineImageGrid
+                    images={assistantImages}
+                    className="mb-3 max-w-[560px]"
+                    onImageExpand={onImageExpand}
+                    onImageLoad={onTimelineImageLoad}
+                  />
+                )}
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
+                  onImageOpen={onOpenMarkdownImage}
                 />
                 {(() => {
                   const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
@@ -534,6 +560,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </div>
       )}
 
+      {row.kind === "user-input" && (
+        <div className="min-w-0 px-1 py-0.5">
+          <UserInputHistoryCard userInput={row.userInput} timestampFormat={timestampFormat} />
+        </div>
+      )}
+
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
           <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
@@ -601,6 +633,7 @@ type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
+type TimelineUserInput = Extract<TimelineEntry, { kind: "user-input" }>["userInput"];
 type TimelineRow =
   | {
       kind: "work";
@@ -621,6 +654,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: TimelineProposedPlan;
+    }
+  | {
+      kind: "user-input";
+      id: string;
+      createdAt: string;
+      userInput: TimelineUserInput;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
@@ -660,6 +699,146 @@ function formatMessageMeta(
   if (!duration) return formatTimestamp(createdAt, timestampFormat);
   return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
 }
+
+function classifyUserInputAnswer(answer: string): {
+  label: string;
+  icon: LucideIcon;
+  className: string;
+} | null {
+  const normalized = answer.toLowerCase();
+  if (normalized.includes("recommended")) {
+    return {
+      label: "Recommended",
+      icon: ZapIcon,
+      className: "border-emerald-500/20 bg-emerald-500/8 text-emerald-300",
+    };
+  }
+  if (
+    normalized.includes("skip") ||
+    normalized.includes("decline") ||
+    normalized.includes("never mind") ||
+    normalized.includes("don't send") ||
+    normalized.includes("do nothing")
+  ) {
+    return {
+      label: "No action",
+      icon: CircleSlashIcon,
+      className: "border-amber-500/20 bg-amber-500/8 text-amber-300",
+    };
+  }
+  if (
+    normalized.includes("draft") ||
+    normalized.includes("reply") ||
+    normalized.includes("apply")
+  ) {
+    return {
+      label: "Action",
+      icon: MessageSquareTextIcon,
+      className: "border-sky-500/20 bg-sky-500/8 text-sky-300",
+    };
+  }
+  return null;
+}
+
+const UserInputHistoryCard = memo(function UserInputHistoryCard(props: {
+  userInput: TimelineUserInput;
+  timestampFormat: TimestampFormat;
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card/35 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex size-7 items-center justify-center rounded-lg border border-blue-500/20 bg-blue-500/8 text-blue-300">
+            <MessageSquareTextIcon className="size-4" />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/65">
+              Ask User
+            </p>
+            <p className="text-xs text-muted-foreground/60">
+              {formatTimestamp(props.userInput.createdAt, props.timestampFormat)}
+            </p>
+          </div>
+        </div>
+        <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+          Answered
+        </span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {props.userInput.questions.map((question) => {
+          const answer = props.userInput.answers[question.id];
+          if (!answer) {
+            return null;
+          }
+          const affordance = classifyUserInputAnswer(answer);
+          return (
+            <div
+              key={`${props.userInput.id}:${question.id}`}
+              className="rounded-lg border border-border/55 bg-background/45 px-3 py-2.5"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">
+                {question.header}
+              </p>
+              <p className="mt-1 text-sm text-foreground/90">{question.question}</p>
+              <div className="mt-2 flex flex-wrap items-start gap-2">
+                {affordance ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
+                      affordance.className,
+                    )}
+                  >
+                    <affordance.icon className="size-3" />
+                    {affordance.label}
+                  </span>
+                ) : null}
+                <span className="text-sm leading-relaxed text-foreground/85">{answer}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+const TimelineImageGrid = memo(function TimelineImageGrid(props: {
+  images: NonNullable<TimelineMessage["attachments"]>;
+  className?: string;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onImageLoad: () => void;
+}) {
+  return (
+    <div className={cn("grid grid-cols-2 gap-2", props.className)}>
+      {props.images.map((image) => (
+        <div
+          key={image.id}
+          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+        >
+          {image.previewUrl ? (
+            <img
+              src={image.previewUrl}
+              alt={image.name}
+              title={`${image.name} - click to expand`}
+              className="h-full max-h-[220px] w-full cursor-zoom-in object-cover"
+              onClick={() => {
+                const preview = buildExpandedImagePreview(props.images, image.id);
+                if (!preview) return;
+                props.onImageExpand(preview);
+              }}
+              onLoad={props.onImageLoad}
+              onError={props.onImageLoad}
+            />
+          ) : (
+            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+              {image.name}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+});
 
 const UserMessageTerminalContextInlineLabel = memo(
   function UserMessageTerminalContextInlineLabel(props: { context: ParsedTerminalContextEntry }) {
@@ -855,6 +1034,8 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onImageLoad: () => void;
 }) {
   const { workEntry } = props;
   const iconConfig = workToneIcon(workEntry.tone);
@@ -864,6 +1045,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const imageSrc = workEntry.imagePath ? resolveInlineImageSrc(workEntry.imagePath) : null;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -889,6 +1071,24 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </p>
         </div>
       </div>
+      {imageSrc ? (
+        <div className="mt-2 pl-6">
+          <img
+            src={imageSrc}
+            alt={workEntry.imagePath ?? heading}
+            title={`${workEntry.imagePath ?? heading} - click to expand`}
+            className="block max-h-[220px] max-w-[320px] cursor-zoom-in rounded-lg border border-border/70 bg-background object-contain shadow-sm"
+            onClick={() =>
+              props.onImageExpand({
+                images: [{ src: imageSrc, name: workEntry.imagePath ?? heading }],
+                index: 0,
+              })
+            }
+            onLoad={props.onImageLoad}
+            onError={props.onImageLoad}
+          />
+        </div>
+      ) : null}
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => (

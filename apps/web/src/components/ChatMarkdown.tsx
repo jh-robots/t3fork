@@ -17,6 +17,7 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
+import { resolveInlineImageSrc } from "../backendOrigin";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -49,6 +50,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  onImageOpen?: (image: { src: string; name: string }) => void;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -129,6 +131,16 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   });
   highlighterPromiseCache.set(language, promise);
   return promise;
+}
+
+const LOCAL_MARKDOWN_IMAGE_PATTERN =
+  /!\[([^\]]*)\]\(((?:[a-zA-Z]:\\|\\\\\\\\|file:\/\/\/|\/)[^)]+)\)/g;
+
+function normalizeMarkdownLocalImageSyntax(text: string): string {
+  return text.replace(LOCAL_MARKDOWN_IMAGE_PATTERN, (_match, altText: string, rawSrc: string) => {
+    const resolvedSrc = resolveInlineImageSrc(rawSrc);
+    return `![${altText}](${resolvedSrc})`;
+  });
 }
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
@@ -235,9 +247,15 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  cwd,
+  isStreaming = false,
+  onImageOpen,
+}: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const normalizedText = useMemo(() => normalizeMarkdownLocalImageSyntax(text), [text]);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
@@ -284,14 +302,43 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           </MarkdownCodeBlock>
         );
       },
+      img({ node: _node, src, alt, ...props }) {
+        const imageName = alt?.trim() || "Assistant image";
+        if (!src) {
+          return (
+            <span className="text-sm text-muted-foreground/70">
+              {imageName}
+            </span>
+          );
+        }
+
+        const resolvedSrc = resolveInlineImageSrc(src);
+
+        return (
+          <img
+            {...props}
+            src={resolvedSrc}
+            alt={imageName}
+            title={onImageOpen ? `${imageName} - click to expand` : imageName}
+            className="mt-2 block min-h-[180px] max-h-[320px] max-w-full cursor-zoom-in rounded-lg border border-border/70 bg-background object-contain shadow-sm"
+            onClick={(event) => {
+              props.onClick?.(event);
+              if (event.defaultPrevented || !onImageOpen) {
+                return;
+              }
+              onImageOpen({ src: resolvedSrc, name: imageName });
+            }}
+          />
+        );
+      },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, onImageOpen],
   );
 
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {text}
+        {normalizedText}
       </ReactMarkdown>
     </div>
   );

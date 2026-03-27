@@ -135,4 +135,21 @@ describe("estimateTimelineMessageHeight", () => {
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(188);
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(122);
   });
+
+  it("adds stable height for assistant image attachments and markdown images", () => {
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: "![Inline image test](/C:/Windows/Temp/inline-response-test.png)",
+      }),
+    ).toBe(444);
+
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: "Rendered artifact",
+        attachments: [{ id: "1" }],
+      }),
+    ).toBe(328);
+  });
 });

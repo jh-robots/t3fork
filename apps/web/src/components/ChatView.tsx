@@ -1,5 +1,5 @@
 import {
-  type ApprovalRequestId,
+  ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
@@ -20,6 +20,7 @@ import {
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
@@ -48,6 +49,7 @@ import {
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
+  deriveResolvedUserInputHistory,
   derivePhase,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -59,6 +61,7 @@ import {
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  type PendingUserInput,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
 import {
@@ -193,6 +196,43 @@ const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const JH_ASK_USER_TEST_REQUEST_ID_PREFIX = "jh-test-pending-user-input";
+
+function buildJhAskUserTestPrompt(): PendingUserInput {
+  const questions: ReadonlyArray<UserInputQuestion> = [
+    {
+      id: "implementation-path",
+      header: "ASK USER",
+      question: "Which implementation path should JH Code take for this task?",
+      options: [
+        {
+          label: "Fast path (Recommended)",
+          description: "Use the lightest change that proves the workflow end to end.",
+        },
+        {
+          label: "Robust path",
+          description: "Spend more time on edge cases, resilience, and polish.",
+        },
+        {
+          label: "Other",
+          description: "Select this, then add your own inline direction in the composer.",
+        },
+      ],
+    },
+  ];
+
+  return {
+    requestId: ApprovalRequestId.makeUnsafe(
+      `${JH_ASK_USER_TEST_REQUEST_ID_PREFIX}-${Date.now()}`,
+    ),
+    createdAt: new Date().toISOString(),
+    questions,
+  };
+}
+
+function isPendingUserInputFreeformOption(optionLabel: string | undefined): boolean {
+  return typeof optionLabel === "string" && /(other|custom|constrained)/i.test(optionLabel);
+}
 
 function formatOutgoingPrompt(params: {
   provider: ProviderKind;
@@ -337,6 +377,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
+  const [jhSyntheticPendingUserInput, setJhSyntheticPendingUserInput] =
+    useState<PendingUserInput | null>(null);
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
@@ -670,6 +712,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const resolvedUserInputHistory = useMemo(
+    () => deriveResolvedUserInputHistory(threadActivities),
+    [threadActivities],
+  );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
     [activeLatestTurn?.turnId, threadActivities],
@@ -678,10 +724,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
   );
-  const pendingUserInputs = useMemo(
-    () => derivePendingUserInputs(threadActivities),
-    [threadActivities],
-  );
+  const pendingUserInputs = useMemo(() => {
+    const derivedPendingUserInputs = derivePendingUserInputs(threadActivities);
+    return jhSyntheticPendingUserInput
+      ? [jhSyntheticPendingUserInput, ...derivedPendingUserInputs]
+      : derivedPendingUserInputs;
+  }, [jhSyntheticPendingUserInput, threadActivities]);
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
     () =>
@@ -910,8 +958,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        resolvedUserInputHistory,
+      ),
+    [activeThread?.proposedPlans, resolvedUserInputHistory, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -2714,6 +2767,40 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const onRespondToUserInput = useCallback(
     async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
+      if (requestId.startsWith(JH_ASK_USER_TEST_REQUEST_ID_PREFIX)) {
+        setJhSyntheticPendingUserInput((existing: PendingUserInput | null) =>
+          existing?.requestId === requestId ? null : existing,
+        );
+        setPendingUserInputAnswersByRequestId((existing) => {
+          const next = { ...existing };
+          delete next[requestId];
+          return next;
+        });
+        setPendingUserInputQuestionIndexByRequestId((existing) => {
+          const next = { ...existing };
+          delete next[requestId];
+          return next;
+        });
+        promptRef.current = "";
+        setPrompt("");
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        const answerSummary = Object.values(answers)
+          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .filter((value) => value.length > 0)
+          .join(" | ");
+        toastManager.add({
+          type: "success",
+          title: "Ask-user test submitted",
+          description:
+            answerSummary.length > 0
+              ? answerSummary
+              : "The synthetic ask-user flow completed successfully.",
+          data: { threadId: activeThreadId ?? null },
+        });
+        return;
+      }
+
       const api = readNativeApi();
       if (!api || !activeThreadId) return;
 
@@ -2737,8 +2824,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
-    [activeThreadId, setStoreThreadError],
+    [activeThreadId, setPrompt, setStoreThreadError],
   );
+
+  const onTriggerAskUserTest = useCallback(() => {
+    const prompt = buildJhAskUserTestPrompt();
+    setJhSyntheticPendingUserInput(prompt);
+    setPendingUserInputAnswersByRequestId((existing) => ({
+      ...existing,
+      [prompt.requestId]: EMPTY_PENDING_USER_INPUT_ANSWERS,
+    }));
+    setPendingUserInputQuestionIndexByRequestId((existing) => ({
+      ...existing,
+      [prompt.requestId]: 0,
+    }));
+    promptRef.current = "";
+    setPrompt("");
+    setComposerCursor(0);
+    setComposerTrigger(null);
+    toastManager.add({
+      type: "info",
+      title: "Ask-user test ready",
+      description: "Choose a suggested answer, then add inline context in the composer if needed.",
+      data: { threadId: activeThreadId ?? null },
+    });
+  }, [activeThreadId, setPrompt]);
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -2764,7 +2874,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...existing[activePendingUserInput.requestId],
           [questionId]: {
             selectedOptionLabel: optionLabel,
-            customAnswer: "",
+            customAnswer: existing[activePendingUserInput.requestId]?.[questionId]?.customAnswer ?? "",
           },
         },
       }));
@@ -3609,6 +3719,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         answers={activePendingDraftAnswers}
                         questionIndex={activePendingQuestionIndex}
                         onSelectOption={onSelectActivePendingUserInputOption}
+                        onPrevious={onPreviousActivePendingUserInputQuestion}
                         onAdvance={onAdvanceActivePendingUserInput}
                       />
                     </div>
@@ -3733,7 +3844,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           ? (activePendingApproval?.detail ??
                             "Resolve this approval request to continue")
                           : activePendingProgress
-                            ? "Type your own answer, or leave this blank to use the selected option"
+                            ? isPendingUserInputFreeformOption(
+                                activePendingProgress.selectedOptionLabel,
+                              )
+                              ? `Add details for "${activePendingProgress.selectedOptionLabel}" here`
+                              : activePendingProgress.selectedOptionLabel
+                                ? `Add optional context for "${activePendingProgress.selectedOptionLabel}" here`
+                                : "Select an answer or type context here"
                             : showPlanFollowUpPrompt && activeProposedPlan
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : phase === "disconnected"
@@ -4188,6 +4305,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               alt={expandedImageItem.name}
               className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
               draggable={false}
+              onClick={closeExpandedImage}
             />
             <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
               {expandedImageItem.name}

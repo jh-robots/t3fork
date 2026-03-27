@@ -157,6 +157,15 @@ function toPosixRelativePath(input: string): string {
   return input.replaceAll("\\", "/");
 }
 
+const LOCAL_FILE_ROUTE_PATH = "/local-file";
+
+function normalizeRequestedLocalFilePath(input: string): string {
+  if (/^\/[A-Za-z]:[\\/]/.test(input)) {
+    return input.slice(1);
+  }
+  return input;
+}
+
 function resolveWorkspaceWritePath(params: {
   workspaceRoot: string;
   relativePath: string;
@@ -485,6 +494,51 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           if (!res.writableEnded) {
             res.end();
           }
+          return;
+        }
+
+        if (url.pathname === LOCAL_FILE_ROUTE_PATH) {
+          const requestedPath = normalizeRequestedLocalFilePath(
+            url.searchParams.get("path")?.trim() ?? "",
+          );
+          if (requestedPath.length === 0) {
+            respond(400, { "Content-Type": "text/plain" }, "Missing local file path");
+            return;
+          }
+          if (!path.isAbsolute(requestedPath)) {
+            respond(400, { "Content-Type": "text/plain" }, "Local file path must be absolute");
+            return;
+          }
+
+          const fileInfo = yield* fileSystem
+            .stat(requestedPath)
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+          if (!fileInfo || fileInfo.type !== "File") {
+            respond(404, { "Content-Type": "text/plain" }, "Not Found");
+            return;
+          }
+
+          const contentType = Mime.getType(requestedPath) ?? "application/octet-stream";
+          if (!contentType.startsWith("image/")) {
+            respond(415, { "Content-Type": "text/plain" }, "Local file is not an image");
+            return;
+          }
+
+          const data = yield* fileSystem
+            .readFile(requestedPath)
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+          if (!data) {
+            respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
+            return;
+          }
+          respond(
+            200,
+            {
+              "Content-Type": contentType,
+              "Cache-Control": "no-store",
+            },
+            data,
+          );
           return;
         }
 

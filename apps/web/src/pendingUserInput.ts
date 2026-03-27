@@ -28,27 +28,35 @@ function normalizeDraftAnswer(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function combinePendingUserInputAnswerParts(params: {
+  selectedOptionLabel: string | null;
+  customAnswer: string | null;
+}): string | null {
+  const { selectedOptionLabel, customAnswer } = params;
+
+  if (selectedOptionLabel && customAnswer) {
+    return `${selectedOptionLabel}\n\nAdditional context:\n${customAnswer}`;
+  }
+
+  return customAnswer ?? selectedOptionLabel;
+}
+
 export function resolvePendingUserInputAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
 ): string | null {
-  const customAnswer = normalizeDraftAnswer(draft?.customAnswer);
-  if (customAnswer) {
-    return customAnswer;
-  }
-
-  return normalizeDraftAnswer(draft?.selectedOptionLabel);
+  return combinePendingUserInputAnswerParts({
+    selectedOptionLabel: normalizeDraftAnswer(draft?.selectedOptionLabel),
+    customAnswer: normalizeDraftAnswer(draft?.customAnswer),
+  });
 }
 
 export function setPendingUserInputCustomAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
 ): PendingUserInputDraftAnswer {
-  const selectedOptionLabel =
-    customAnswer.trim().length > 0 ? undefined : draft?.selectedOptionLabel;
-
   return {
     customAnswer,
-    ...(selectedOptionLabel ? { selectedOptionLabel } : {}),
+    ...(draft?.selectedOptionLabel ? { selectedOptionLabel: draft.selectedOptionLabel } : {}),
   };
 }
 
