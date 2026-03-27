@@ -290,6 +290,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const { settings } = useAppSettings();
   const setStickyComposerModel = useComposerDraftStore((store) => store.setStickyModel);
   const timestampFormat = settings.timestampFormat;
+  const jhAskUserWorkflowEnabled = settings.jhFeatureFlags.askUserWorkflow;
+  const jhRichImageRenderingEnabled = settings.jhFeatureFlags.richImageRendering;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -713,8 +715,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeLatestTurn?.turnId, threadActivities],
   );
   const resolvedUserInputHistory = useMemo(
-    () => deriveResolvedUserInputHistory(threadActivities),
-    [threadActivities],
+    () => (jhAskUserWorkflowEnabled ? deriveResolvedUserInputHistory(threadActivities) : []),
+    [jhAskUserWorkflowEnabled, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -3638,9 +3640,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onTouchEnd={onMessagesTouchEnd}
               onTouchCancel={onMessagesTouchEnd}
             >
-              <MessagesTimeline
-                key={activeThread.id}
-                hasMessages={timelineEntries.length > 0}
+                <MessagesTimeline
+                  key={activeThread.id}
+                  hasMessages={timelineEntries.length > 0}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}
@@ -3656,11 +3658,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
-                onImageExpand={onExpandTimelineImage}
-                markdownCwd={gitCwd ?? undefined}
-                resolvedTheme={resolvedTheme}
-                timestampFormat={timestampFormat}
-                workspaceRoot={activeProject?.cwd ?? undefined}
+                  onImageExpand={onExpandTimelineImage}
+                  markdownCwd={gitCwd ?? undefined}
+                  richImageRenderingEnabled={jhRichImageRenderingEnabled}
+                  resolvedTheme={resolvedTheme}
+                  timestampFormat={timestampFormat}
+                  workspaceRoot={activeProject?.cwd ?? undefined}
               />
             </div>
 
@@ -3713,14 +3716,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     </div>
                   ) : pendingUserInputs.length > 0 ? (
                     <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                      <ComposerPendingUserInputPanel
-                        pendingUserInputs={pendingUserInputs}
-                        respondingRequestIds={respondingRequestIds}
-                        answers={activePendingDraftAnswers}
-                        questionIndex={activePendingQuestionIndex}
-                        onSelectOption={onSelectActivePendingUserInputOption}
-                        onPrevious={onPreviousActivePendingUserInputQuestion}
-                        onAdvance={onAdvanceActivePendingUserInput}
+                        <ComposerPendingUserInputPanel
+                          pendingUserInputs={pendingUserInputs}
+                          respondingRequestIds={respondingRequestIds}
+                          answers={activePendingDraftAnswers}
+                          questionIndex={activePendingQuestionIndex}
+                          enhancedExperienceEnabled={jhAskUserWorkflowEnabled}
+                          onSelectOption={onSelectActivePendingUserInputOption}
+                          onPrevious={onPreviousActivePendingUserInputQuestion}
+                          onAdvance={onAdvanceActivePendingUserInput}
                       />
                     </div>
                   ) : showPlanFollowUpPrompt && activeProposedPlan ? (

@@ -65,6 +65,7 @@ interface PendingUserInputPanelProps {
   respondingRequestIds: ApprovalRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
+  enhancedExperienceEnabled: boolean;
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onPrevious: () => void;
   onAdvance: () => void;
@@ -75,6 +76,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   respondingRequestIds,
   answers,
   questionIndex,
+  enhancedExperienceEnabled,
   onSelectOption,
   onPrevious,
   onAdvance,
@@ -90,6 +92,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
       answers={answers}
       questionIndex={questionIndex}
+      enhancedExperienceEnabled={enhancedExperienceEnabled}
       onSelectOption={onSelectOption}
       onPrevious={onPrevious}
       onAdvance={onAdvance}
@@ -102,6 +105,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   isResponding,
   answers,
   questionIndex,
+  enhancedExperienceEnabled,
   onSelectOption,
   onPrevious,
   onAdvance,
@@ -110,6 +114,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
+  enhancedExperienceEnabled: boolean;
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onPrevious: () => void;
   onAdvance: () => void;
@@ -117,9 +122,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
-  const hasMultipleQuestions = prompt.questions.length > 1;
+  const hasMultipleQuestions = enhancedExperienceEnabled && prompt.questions.length > 1;
   const orderedOptions = activeQuestion
     ? [...activeQuestion.options].sort((left, right) => {
+        if (!enhancedExperienceEnabled) {
+          return 0;
+        }
         const leftIsFillIn = isFillInOptionLabel(left.label);
         const rightIsFillIn = isFillInOptionLabel(right.label);
         if (leftIsFillIn === rightIsFillIn) {
@@ -141,7 +149,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const selectOptionAndAutoAdvance = useCallback(
     (questionId: string, optionLabel: string) => {
       onSelectOption(questionId, optionLabel);
-      if (isFillInOptionLabel(optionLabel)) {
+      if (!enhancedExperienceEnabled || isFillInOptionLabel(optionLabel)) {
         return;
       }
       if (autoAdvanceTimerRef.current !== null) {
@@ -152,7 +160,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         onAdvance();
       }, 200);
     },
-    [onSelectOption, onAdvance],
+    [enhancedExperienceEnabled, onSelectOption, onAdvance],
   );
 
   // Keyboard shortcut: number keys 1-9 select corresponding option and auto-advance.
@@ -267,9 +275,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">
-                    {affordance ? stripAffordanceSuffix(option.label) : option.label}
+                    {enhancedExperienceEnabled && affordance
+                      ? stripAffordanceSuffix(option.label)
+                      : option.label}
                   </span>
-                  {affordance ? (
+                  {enhancedExperienceEnabled && affordance ? (
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
@@ -279,7 +289,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                       {affordance.label}
                     </span>
                   ) : null}
-                  {isFillInOption ? (
+                  {enhancedExperienceEnabled && isFillInOption ? (
                     <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70">
                       <PencilLineIcon className="size-3" />
                       Fill in below
@@ -288,7 +298,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 </div>
                 {normalizedDescription && normalizedDescription !== option.label ? (
                   <div className="mt-0.5 text-xs text-muted-foreground/50">
-                    {normalizedDescription}
+                    {enhancedExperienceEnabled ? normalizedDescription : option.description}
                   </div>
                 ) : null}
               </div>

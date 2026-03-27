@@ -256,6 +256,12 @@ function SettingsRouteView() {
     ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
       ? ["Assistant output"]
       : []),
+    ...(settings.jhFeatureFlags.askUserWorkflow !== defaults.jhFeatureFlags.askUserWorkflow
+      ? ["JH ask-user workflow"]
+      : []),
+    ...(settings.jhFeatureFlags.richImageRendering !== defaults.jhFeatureFlags.richImageRendering
+      ? ["JH rich image rendering"]
+      : []),
     ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
       ? ["Delete confirmation"]
@@ -553,6 +559,74 @@ function SettingsRouteView() {
                       })
                     }
                     aria-label="Stream assistant messages"
+                  />
+                  }
+                />
+
+              <SettingsRow
+                title="JH ask-user workflow"
+                description="Toggle the richer JH ask-user UI, including multi-question navigation, custom-context handling, and answer history cards."
+                resetAction={
+                  settings.jhFeatureFlags.askUserWorkflow !== defaults.jhFeatureFlags.askUserWorkflow ? (
+                    <SettingResetButton
+                      label="JH ask-user workflow"
+                      onClick={() =>
+                        updateSettings({
+                          jhFeatureFlags: {
+                            ...settings.jhFeatureFlags,
+                            askUserWorkflow: defaults.jhFeatureFlags.askUserWorkflow,
+                          },
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={settings.jhFeatureFlags.askUserWorkflow}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        jhFeatureFlags: {
+                          ...settings.jhFeatureFlags,
+                          askUserWorkflow: Boolean(checked),
+                        },
+                      })
+                    }
+                    aria-label="Enable JH ask-user workflow"
+                  />
+                }
+              />
+
+              <SettingsRow
+                title="JH rich image rendering"
+                description="Toggle inline assistant image rendering, image-view rendering, and JH image interaction controls."
+                resetAction={
+                  settings.jhFeatureFlags.richImageRendering !== defaults.jhFeatureFlags.richImageRendering ? (
+                    <SettingResetButton
+                      label="JH rich image rendering"
+                      onClick={() =>
+                        updateSettings({
+                          jhFeatureFlags: {
+                            ...settings.jhFeatureFlags,
+                            richImageRendering: defaults.jhFeatureFlags.richImageRendering,
+                          },
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={settings.jhFeatureFlags.richImageRendering}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        jhFeatureFlags: {
+                          ...settings.jhFeatureFlags,
+                          richImageRendering: Boolean(checked),
+                        },
+                      })
+                    }
+                    aria-label="Enable JH rich image rendering"
                   />
                 }
               />

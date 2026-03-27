@@ -96,6 +96,7 @@ describe("MessagesTimeline", () => {
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
+        richImageRenderingEnabled
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
@@ -141,6 +142,7 @@ describe("MessagesTimeline", () => {
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
+        richImageRenderingEnabled
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
@@ -197,6 +199,7 @@ describe("MessagesTimeline", () => {
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
+        richImageRenderingEnabled
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
@@ -246,6 +249,7 @@ describe("MessagesTimeline", () => {
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
+        richImageRenderingEnabled
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}

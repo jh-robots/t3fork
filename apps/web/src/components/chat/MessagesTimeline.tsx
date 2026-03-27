@@ -84,6 +84,7 @@ interface MessagesTimelineProps {
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
+  richImageRenderingEnabled: boolean;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
@@ -108,6 +109,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isRevertingCheckpoint,
   onImageExpand,
   markdownCwd,
+  richImageRenderingEnabled,
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
@@ -258,12 +260,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       rows.some(
         (row) =>
           (row.kind === "message" &&
-            ((row.message.attachments?.length ?? 0) > 0 ||
+            ((row.message.role === "user" && (row.message.attachments?.length ?? 0) > 0) ||
+              (richImageRenderingEnabled && (row.message.attachments?.length ?? 0) > 0) ||
               (row.message.role === "assistant" &&
+                richImageRenderingEnabled &&
                 INLINE_MEDIA_MARKDOWN_PATTERN.test(row.message.text)))) ||
-          (row.kind === "work" && row.groupedEntries.some((entry) => Boolean(entry.imagePath))),
+          (richImageRenderingEnabled &&
+            row.kind === "work" &&
+            row.groupedEntries.some((entry) => Boolean(entry.imagePath))),
       ),
-    [rows],
+    [richImageRenderingEnabled, rows],
   );
 
   const virtualizedRowCount = hasInlineMediaRows
@@ -390,6 +396,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <SimpleWorkEntryRow
                     key={`work-row:${workEntry.id}`}
                     workEntry={workEntry}
+                    richImageRenderingEnabled={richImageRenderingEnabled}
                     onImageExpand={onImageExpand}
                     onImageLoad={onTimelineImageLoad}
                   />
@@ -455,7 +462,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          const assistantImages = row.message.attachments ?? [];
+          const assistantImages = richImageRenderingEnabled ? (row.message.attachments ?? []) : [];
           return (
             <>
               {row.showCompletionDivider && (
@@ -480,7 +487,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   text={messageText}
                   cwd={markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
-                  onImageOpen={onOpenMarkdownImage}
+                  {...(richImageRenderingEnabled ? { onImageOpen: onOpenMarkdownImage } : {})}
+                  richImageRenderingEnabled={richImageRenderingEnabled}
                 />
                 {(() => {
                   const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
@@ -1090,6 +1098,7 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
+  richImageRenderingEnabled: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onImageLoad: () => void;
 }) {
@@ -1101,7 +1110,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
-  const imageSrc = workEntry.imagePath ? resolveInlineImageSrc(workEntry.imagePath) : null;
+  const imageSrc =
+    props.richImageRenderingEnabled && workEntry.imagePath
+      ? resolveInlineImageSrc(workEntry.imagePath)
+      : null;
 
   return (
     <div className="rounded-lg px-1 py-1">

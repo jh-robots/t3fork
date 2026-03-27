@@ -51,6 +51,7 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   isStreaming?: boolean;
   onImageOpen?: (image: { src: string; name: string }) => void;
+  richImageRenderingEnabled?: boolean;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -252,6 +253,7 @@ function ChatMarkdown({
   cwd,
   isStreaming = false,
   onImageOpen,
+  richImageRenderingEnabled = true,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -314,6 +316,10 @@ function ChatMarkdown({
 
         const resolvedSrc = resolveInlineImageSrc(src);
 
+        if (!richImageRenderingEnabled) {
+          return <a href={resolvedSrc} target="_blank" rel="noreferrer">{imageName}</a>;
+        }
+
         return (
           <MarkdownInlineImage
             src={resolvedSrc}
@@ -325,7 +331,7 @@ function ChatMarkdown({
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming, onImageOpen],
+    [cwd, diffThemeName, isStreaming, onImageOpen, richImageRenderingEnabled],
   );
 
   return (

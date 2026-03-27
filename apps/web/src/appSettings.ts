@@ -56,6 +56,13 @@ const withDefaults =
       Schema.withDecodingDefault(() => fallback()),
     );
 
+export const JHFeatureFlagsSchema = Schema.Struct({
+  askUserWorkflow: Schema.Boolean.pipe(withDefaults(() => true)),
+  richImageRendering: Schema.Boolean.pipe(withDefaults(() => true)),
+});
+export type JHFeatureFlags = typeof JHFeatureFlagsSchema.Type;
+export const DEFAULT_JH_FEATURE_FLAGS = JHFeatureFlagsSchema.makeUnsafe({});
+
 export const AppSettingsSchema = Schema.Struct({
   claudeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
@@ -64,6 +71,7 @@ export const AppSettingsSchema = Schema.Struct({
   confirmThreadDelete: Schema.Boolean.pipe(withDefaults(() => true)),
   diffWordWrap: Schema.Boolean.pipe(withDefaults(() => false)),
   enableAssistantStreaming: Schema.Boolean.pipe(withDefaults(() => false)),
+  jhFeatureFlags: JHFeatureFlagsSchema.pipe(withDefaults(() => DEFAULT_JH_FEATURE_FLAGS)),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     withDefaults(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
