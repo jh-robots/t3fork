@@ -63,6 +63,8 @@ const withDefaults =
 export const JHFeatureFlagOverridesSchema = Schema.Struct({
   askUserWorkflow: Schema.optional(Schema.Boolean),
   richImageRendering: Schema.optional(Schema.Boolean),
+  streamlinedHeaderActions: Schema.optional(Schema.Boolean),
+  mobileTerminalViewport: Schema.optional(Schema.Boolean),
 });
 export type JHFeatureFlagOverrides = typeof JHFeatureFlagOverridesSchema.Type;
 export const DEFAULT_JH_FEATURE_FLAG_OVERRIDES = JHFeatureFlagOverridesSchema.makeUnsafe({});
@@ -169,6 +171,14 @@ export function resolveJhFeatureFlagOverrides(
     overrides.richImageRendering === managedDefaults.richImageRendering
       ? {}
       : { richImageRendering: overrides.richImageRendering }),
+    ...(overrides.streamlinedHeaderActions === undefined ||
+    overrides.streamlinedHeaderActions === managedDefaults.streamlinedHeaderActions
+      ? {}
+      : { streamlinedHeaderActions: overrides.streamlinedHeaderActions }),
+    ...(overrides.mobileTerminalViewport === undefined ||
+    overrides.mobileTerminalViewport === managedDefaults.mobileTerminalViewport
+      ? {}
+      : { mobileTerminalViewport: overrides.mobileTerminalViewport }),
   };
 }
 

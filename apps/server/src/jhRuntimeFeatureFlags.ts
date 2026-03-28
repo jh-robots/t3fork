@@ -6,6 +6,8 @@ import { Effect } from "effect";
 export interface JHRuntimeFeatureFlags {
   askUserWorkflow: boolean;
   richImageRendering: boolean;
+  streamlinedHeaderActions: boolean;
+  mobileTerminalViewport: boolean;
 }
 
 export interface JHRuntimeFeatureFlagsConfig {
@@ -18,6 +20,8 @@ export interface JHRuntimeFeatureFlagsConfig {
 export const DEFAULT_JH_RUNTIME_FEATURE_FLAGS: JHRuntimeFeatureFlags = {
   askUserWorkflow: true,
   richImageRendering: true,
+  streamlinedHeaderActions: true,
+  mobileTerminalViewport: true,
 };
 
 function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
@@ -28,7 +32,9 @@ function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
   const candidate = input as Record<string, unknown>;
   return (
     typeof candidate.askUserWorkflow === "boolean" &&
-    typeof candidate.richImageRendering === "boolean"
+    typeof candidate.richImageRendering === "boolean" &&
+    typeof candidate.streamlinedHeaderActions === "boolean" &&
+    typeof candidate.mobileTerminalViewport === "boolean"
   );
 }
 

@@ -27,6 +27,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readNativeApi } from "~/nativeApi";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -662,6 +663,7 @@ interface ThreadTerminalDrawerProps {
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  mobileViewportAware?: boolean;
 }
 
 interface TerminalActionButtonProps {
@@ -712,9 +714,12 @@ export default function ThreadTerminalDrawer({
   onCloseTerminal,
   onHeightChange,
   onAddTerminalContext,
+  mobileViewportAware = false,
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const [visualViewportInset, setVisualViewportInset] = useState(0);
+  const isTouchMobile = useMediaQuery({ max: "md", pointer: "coarse" });
   const drawerHeightRef = useRef(drawerHeight);
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
@@ -930,6 +935,38 @@ export default function ThreadTerminalDrawer({
   }, [syncHeight]);
 
   useEffect(() => {
+    if (
+      !mobileViewportAware ||
+      !isTouchMobile ||
+      typeof window === "undefined" ||
+      window.visualViewport === undefined ||
+      window.visualViewport === null
+    ) {
+      setVisualViewportInset(0);
+      return;
+    }
+    const viewport = window.visualViewport;
+
+    const updateViewportInset = () => {
+      if (!viewport) {
+        setVisualViewportInset(0);
+        return;
+      }
+      setVisualViewportInset(
+        Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)),
+      );
+    };
+
+    updateViewportInset();
+    viewport.addEventListener("resize", updateViewportInset);
+    viewport.addEventListener("scroll", updateViewportInset);
+    return () => {
+      viewport.removeEventListener("resize", updateViewportInset);
+      viewport.removeEventListener("scroll", updateViewportInset);
+    };
+  }, [isTouchMobile, mobileViewportAware]);
+
+  useEffect(() => {
     return () => {
       syncHeight(drawerHeightRef.current);
     };
@@ -938,7 +975,13 @@ export default function ThreadTerminalDrawer({
   return (
     <aside
       className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      style={{
+        height: `${drawerHeight}px`,
+        marginBottom:
+          mobileViewportAware && isTouchMobile && visualViewportInset > 0
+            ? `${visualViewportInset}px`
+            : undefined,
+      }}
     >
       <div
         className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
@@ -982,7 +1025,15 @@ export default function ThreadTerminalDrawer({
         </div>
       )}
 
-      <div className="min-h-0 w-full flex-1">
+      <div
+        className="min-h-0 w-full flex-1"
+        style={{
+          paddingBottom:
+            mobileViewportAware && isTouchMobile && visualViewportInset > 0
+              ? "env(safe-area-inset-bottom)"
+              : undefined,
+        }}
+      >
         <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? "gap-1.5" : ""}`}>
           <div className="min-w-0 flex-1">
             {isSplitView ? (

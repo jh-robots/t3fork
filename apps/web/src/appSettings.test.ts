@@ -276,10 +276,14 @@ describe("JH feature flag overrides", () => {
         {
           askUserWorkflow: true,
           richImageRendering: false,
+          streamlinedHeaderActions: true,
+          mobileTerminalViewport: true,
         },
         {
           askUserWorkflow: true,
           richImageRendering: true,
+          streamlinedHeaderActions: true,
+          mobileTerminalViewport: true,
         },
       ),
     ).toEqual({
@@ -302,6 +306,14 @@ describe("JH feature flag overrides", () => {
           richImageRendering: false,
         },
         "richImageRendering",
+      ),
+    ).toBe(true);
+    expect(
+      isJhFeatureFlagOverridden(
+        {
+          streamlinedHeaderActions: false,
+        },
+        "streamlinedHeaderActions",
       ),
     ).toBe(true);
   });

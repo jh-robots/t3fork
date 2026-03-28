@@ -4,15 +4,21 @@ import { Schema } from "effect";
 export const JHFeatureFlagsSchema = Schema.Struct({
   askUserWorkflow: Schema.Boolean,
   richImageRendering: Schema.Boolean,
+  streamlinedHeaderActions: Schema.Boolean,
+  mobileTerminalViewport: Schema.Boolean,
 });
 export type JHFeatureFlags = typeof JHFeatureFlagsSchema.Type;
 export const DEFAULT_JH_FEATURE_FLAGS: JHFeatureFlags = {
   askUserWorkflow: true,
   richImageRendering: true,
+  streamlinedHeaderActions: true,
+  mobileTerminalViewport: true,
 };
 export type JHFeatureFlagOverrideMap = {
   askUserWorkflow?: boolean | undefined;
   richImageRendering?: boolean | undefined;
+  streamlinedHeaderActions?: boolean | undefined;
+  mobileTerminalViewport?: boolean | undefined;
 };
 
 export const JHRuntimeFeatureFlagsConfigSchema = Schema.Struct({
@@ -37,9 +43,14 @@ export const jhRuntimeFeatureFlagQueryKeys = {
 
 export function resolveJhManagementHttpOrigin(): string {
   const envOrigin = import.meta.env.VITE_JH_MANAGEMENT_HTTP_URL as string | undefined;
-  return typeof envOrigin === "string" && envOrigin.length > 0
-    ? envOrigin
-    : "http://127.0.0.1:4773";
+  if (typeof envOrigin === "string" && envOrigin.length > 0) {
+    return envOrigin;
+  }
+  if (typeof window !== "undefined" && window.location.hostname.length > 0) {
+    const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+    return `${protocol}//${window.location.hostname}:4773`;
+  }
+  return "http://127.0.0.1:4773";
 }
 
 export function resolveJhRuntimeFeatureFlagsUrl(): string {
@@ -75,6 +86,10 @@ export function resolveEffectiveJhFeatureFlags(params: {
     askUserWorkflow: params.overrides.askUserWorkflow ?? params.managedDefaults.askUserWorkflow,
     richImageRendering:
       params.overrides.richImageRendering ?? params.managedDefaults.richImageRendering,
+    streamlinedHeaderActions:
+      params.overrides.streamlinedHeaderActions ?? params.managedDefaults.streamlinedHeaderActions,
+    mobileTerminalViewport:
+      params.overrides.mobileTerminalViewport ?? params.managedDefaults.mobileTerminalViewport,
   };
 }
 

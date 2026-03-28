@@ -134,11 +134,11 @@ import {
   DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
   jhRuntimeFeatureFlagsQueryOptions,
   resolveEffectiveJhFeatureFlags,
+} from "../jhRuntimeFeatureFlags";
 import {
   clearJhThreadComposerState,
   fetchJhThreadComposerState,
 } from "../jhComposerPrefill";
-} from "../jhRuntimeFeatureFlags";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -194,10 +194,10 @@ import {
   SendPhase,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { onJhComposerPrefillUpdated } from "../wsNativeApi";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
-import { onJhComposerPrefillUpdated } from "../wsNativeApi";
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
@@ -308,6 +308,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   });
   const jhAskUserWorkflowEnabled = effectiveJhFeatureFlags.askUserWorkflow;
   const jhRichImageRenderingEnabled = effectiveJhFeatureFlags.richImageRendering;
+  const jhStreamlinedHeaderActionsEnabled = effectiveJhFeatureFlags.streamlinedHeaderActions;
+  const jhMobileTerminalViewportEnabled = effectiveJhFeatureFlags.mobileTerminalViewport;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -331,6 +333,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const applyManagedComposerPrefill = useComposerDraftStore((store) => store.applyManagedPrefill);
+  const clearManagedComposerPrefill = useComposerDraftStore((store) => store.clearManagedPrefill);
   const setComposerDraftProvider = useComposerDraftStore((store) => store.setProvider);
   const setComposerDraftModel = useComposerDraftStore((store) => store.setModel);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
@@ -339,8 +343,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
-  const applyManagedComposerPrefill = useComposerDraftStore((store) => store.applyManagedPrefill);
-  const clearManagedComposerPrefill = useComposerDraftStore((store) => store.clearManagedPrefill);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
@@ -457,19 +459,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setMessagesScrollElement(element);
   }, []);
 
-  const terminalState = useTerminalStateStore((state) =>
-    selectThreadTerminalState(state.terminalStateByThreadId, threadId),
-  );
-  const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
-  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
-  const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
-  const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
-  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
-  const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
-
-  const setPrompt = useCallback(
-    (nextPrompt: string) => {
-      setComposerDraftPrompt(threadId, nextPrompt);
   useEffect(() => {
     let disposed = false;
 
@@ -503,6 +492,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     };
   }, [applyManagedComposerPrefill, clearManagedComposerPrefill, threadId]);
 
+  const terminalState = useTerminalStateStore((state) =>
+    selectThreadTerminalState(state.terminalStateByThreadId, threadId),
+  );
+  const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
+  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
+  const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
+  const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
+  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
+  const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+
+  const setPrompt = useCallback(
+    (nextPrompt: string) => {
+      setComposerDraftPrompt(threadId, nextPrompt);
     },
     [setComposerDraftPrompt, threadId],
   );
@@ -2737,6 +2739,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
+      void clearJhThreadComposerState(threadIdForSend);
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
         await api.orchestration
@@ -2813,7 +2816,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
             err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
-      void clearJhThreadComposerState(threadIdForSend);
       setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
     [activeThreadId, setStoreThreadError],
@@ -3641,6 +3643,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeThreadTitle={activeThread.title}
           activeProjectId={activeProject?.id}
           activeProjectName={activeProject?.name}
+          streamlinedHeaderActions={jhStreamlinedHeaderActionsEnabled}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
           activeProjectScripts={activeProject?.scripts}
@@ -4315,6 +4318,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             onCloseTerminal={closeTerminal}
             onHeightChange={setTerminalHeight}
             onAddTerminalContext={addTerminalContextToDraft}
+            mobileViewportAware={jhMobileTerminalViewportEnabled}
           />
         );
       })()}

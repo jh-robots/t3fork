@@ -280,6 +280,12 @@ function SettingsRouteView() {
     ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "richImageRendering")
       ? ["JH rich image rendering override"]
       : []),
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "streamlinedHeaderActions")
+      ? ["JH streamlined header actions override"]
+      : []),
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileTerminalViewport")
+      ? ["JH mobile terminal viewport override"]
+      : []),
     ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
       ? ["Delete confirmation"]
@@ -404,7 +410,11 @@ function SettingsRouteView() {
   }
 
   function setJhFeatureFlagOverride(
-    key: "askUserWorkflow" | "richImageRendering",
+    key:
+      | "askUserWorkflow"
+      | "richImageRendering"
+      | "streamlinedHeaderActions"
+      | "mobileTerminalViewport",
     enabled: boolean,
   ) {
     updateSettings({
@@ -418,7 +428,13 @@ function SettingsRouteView() {
     });
   }
 
-  function clearJhFeatureFlagOverride(key: "askUserWorkflow" | "richImageRendering") {
+  function clearJhFeatureFlagOverride(
+    key:
+      | "askUserWorkflow"
+      | "richImageRendering"
+      | "streamlinedHeaderActions"
+      | "mobileTerminalViewport",
+  ) {
     const nextOverrides = { ...settings.jhFeatureFlags };
     delete nextOverrides[key];
     updateSettings({
@@ -658,6 +674,64 @@ function SettingsRouteView() {
                       setJhFeatureFlagOverride("richImageRendering", Boolean(checked))
                     }
                     aria-label="Enable JH rich image rendering"
+                  />
+                }
+              />
+
+              <SettingsRow
+                title="JH streamlined header actions"
+                description="Hide the top-bar Open in editor and git quick actions while keeping the project switcher, terminal, and diff controls available."
+                status={`Managed default: ${managedJhFeatureFlags.streamlinedHeaderActions ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "streamlinedHeaderActions")
+                    ? effectiveJhFeatureFlags.streamlinedHeaderActions
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                }`}
+                resetAction={
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "streamlinedHeaderActions") ? (
+                    <SettingResetButton
+                      label="JH streamlined header actions override"
+                      onClick={() => clearJhFeatureFlagOverride("streamlinedHeaderActions")}
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={effectiveJhFeatureFlags.streamlinedHeaderActions}
+                    onCheckedChange={(checked) =>
+                      setJhFeatureFlagOverride("streamlinedHeaderActions", Boolean(checked))
+                    }
+                    aria-label="Enable JH streamlined header actions"
+                  />
+                }
+              />
+
+              <SettingsRow
+                title="JH mobile terminal viewport"
+                description="Keep the terminal drawer aligned to the visible mobile viewport so it lifts above the on-screen keyboard and remains usable while typing."
+                status={`Managed default: ${managedJhFeatureFlags.mobileTerminalViewport ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileTerminalViewport")
+                    ? effectiveJhFeatureFlags.mobileTerminalViewport
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                }`}
+                resetAction={
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileTerminalViewport") ? (
+                    <SettingResetButton
+                      label="JH mobile terminal viewport override"
+                      onClick={() => clearJhFeatureFlagOverride("mobileTerminalViewport")}
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={effectiveJhFeatureFlags.mobileTerminalViewport}
+                    onCheckedChange={(checked) =>
+                      setJhFeatureFlagOverride("mobileTerminalViewport", Boolean(checked))
+                    }
+                    aria-label="Enable JH mobile terminal viewport handling"
                   />
                 }
               />
