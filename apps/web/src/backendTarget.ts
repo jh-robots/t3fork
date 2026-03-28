@@ -12,14 +12,36 @@ export const BACKEND_TARGET_LABELS: Record<BackendTarget, string> = {
 };
 
 export const BACKEND_TARGET_DESCRIPTIONS: Record<BackendTarget, string> = {
-  "jh-standalone": "Use the JH-managed backend on port 4773.",
-  "upstream-mirror": "Mirror the upstream T3 backend on port 3773.",
+  "jh-standalone": "Use the JH-managed backend for this session.",
+  "upstream-mirror": "Mirror the upstream T3 backend for this session.",
 };
 
+function resolveBrowserHost(): string {
+  if (typeof window === "undefined") {
+    return "127.0.0.1";
+  }
+  return window.location.hostname || "127.0.0.1";
+}
+
+function resolveHttpProtocol(): "http:" | "https:" {
+  if (typeof window === "undefined") {
+    return "http:";
+  }
+  return window.location.protocol === "https:" ? "https:" : "http:";
+}
+
+function resolveWsProtocol(): "ws:" | "wss:" {
+  return resolveHttpProtocol() === "https:" ? "wss:" : "ws:";
+}
+
 export function resolveBackendTargetWsUrl(target: BackendTarget): string {
-  return target === "upstream-mirror" ? "ws://127.0.0.1:3773" : "ws://127.0.0.1:4773";
+  const host = resolveBrowserHost();
+  const port = target === "upstream-mirror" ? 3773 : 4773;
+  return `${resolveWsProtocol()}//${host}:${port}`;
 }
 
 export function resolveBackendTargetHttpOrigin(target: BackendTarget): string {
-  return target === "upstream-mirror" ? "http://127.0.0.1:3773" : "http://127.0.0.1:4773";
+  const host = resolveBrowserHost();
+  const port = target === "upstream-mirror" ? 3773 : 4773;
+  return `${resolveHttpProtocol()}//${host}:${port}`;
 }

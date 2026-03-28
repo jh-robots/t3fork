@@ -79,7 +79,7 @@ export class WsTransport {
       url ??
       (bridgeUrl && bridgeUrl.length > 0
         ? bridgeUrl
-        : envUrl && envUrl.length > 0 && window.nativeApi !== undefined
+        : envUrl && envUrl.length > 0
           ? envUrl
           : resolveBackendTargetWsUrl(configuredTarget));
     this.connect();

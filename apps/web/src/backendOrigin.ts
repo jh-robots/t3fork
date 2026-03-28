@@ -1,4 +1,9 @@
-import { BACKEND_TARGET_STORAGE_KEY, BackendTarget, DEFAULT_BACKEND_TARGET } from "./backendTarget";
+import {
+  BACKEND_TARGET_STORAGE_KEY,
+  BackendTarget,
+  DEFAULT_BACKEND_TARGET,
+  resolveBackendTargetHttpOrigin,
+} from "./backendTarget";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 
 export function resolveWsHttpOrigin(): string {
@@ -6,8 +11,7 @@ export function resolveWsHttpOrigin(): string {
   const bridgeWsUrl = window.desktopBridge?.getWsUrl?.();
   const configuredTarget =
     getLocalStorageItem(BACKEND_TARGET_STORAGE_KEY, BackendTarget) ?? DEFAULT_BACKEND_TARGET;
-  const envWsUrl =
-    window.nativeApi !== undefined ? (import.meta.env.VITE_WS_URL as string | undefined) : undefined;
+  const envWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
   const wsCandidate =
     typeof bridgeWsUrl === "string" && bridgeWsUrl.length > 0
       ? bridgeWsUrl
@@ -15,7 +19,7 @@ export function resolveWsHttpOrigin(): string {
         ? envWsUrl
         : null;
   if (!wsCandidate) {
-    return configuredTarget === "upstream-mirror" ? "http://127.0.0.1:3773" : "http://127.0.0.1:4773";
+    return resolveBackendTargetHttpOrigin(configuredTarget);
   }
   try {
     const wsUrl = new URL(wsCandidate);
@@ -23,7 +27,7 @@ export function resolveWsHttpOrigin(): string {
       wsUrl.protocol === "wss:" ? "https:" : wsUrl.protocol === "ws:" ? "http:" : wsUrl.protocol;
     return `${protocol}//${wsUrl.host}`;
   } catch {
-    return configuredTarget === "upstream-mirror" ? "http://127.0.0.1:3773" : "http://127.0.0.1:4773";
+    return resolveBackendTargetHttpOrigin(configuredTarget);
   }
 }
 

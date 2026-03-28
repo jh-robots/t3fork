@@ -86,6 +86,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -216,8 +217,7 @@ function getServerHttpOrigin(): string {
   const bridgeUrl = window.desktopBridge?.getWsUrl();
   const configuredTarget =
     getLocalStorageItem(BACKEND_TARGET_STORAGE_KEY, BackendTarget) ?? DEFAULT_BACKEND_TARGET;
-  const envUrl =
-    window.nativeApi !== undefined ? (import.meta.env.VITE_WS_URL as string | undefined) : undefined;
+  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
   const wsUrl =
     bridgeUrl && bridgeUrl.length > 0
       ? bridgeUrl
@@ -437,6 +437,7 @@ export default function Sidebar() {
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
   );
+  const { isMobile, setOpenMobile } = useSidebar();
   const navigate = useNavigate();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings, updateSettings } = useAppSettings();
@@ -558,12 +559,15 @@ export default function Sidebar() {
       )[0];
       if (!latestThread) return;
 
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId: latestThread.id },
       });
     },
-    [appSettings.sidebarThreadSortOrder, navigate, threads],
+    [appSettings.sidebarThreadSortOrder, isMobile, navigate, setOpenMobile, threads],
   );
 
   const addProjectFromPath = useCallback(
@@ -1008,6 +1012,9 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -1015,10 +1022,12 @@ export default function Sidebar() {
     },
     [
       clearSelection,
+      isMobile,
       navigate,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
+      setOpenMobile,
       toggleThreadSelection,
     ],
   );
@@ -1219,6 +1228,9 @@ export default function Sidebar() {
                 clearSelection();
               }
               setSelectionAnchor(thread.id);
+              if (isMobile) {
+                setOpenMobile(false);
+              }
               void navigate({
                 to: "/$threadId",
                 params: { threadId: thread.id },

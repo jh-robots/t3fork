@@ -6,6 +6,19 @@ import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
+const host = process.env.T3CODE_WEB_HOST?.trim() || "localhost";
+const hmrHost = process.env.T3CODE_HMR_HOST?.trim() || host;
+const allowAllHosts =
+  (process.env.JH_CODE_ALLOW_ALL_WEB_HOSTS ?? "").trim().toLowerCase() === "1" ||
+  (process.env.JH_CODE_ALLOW_ALL_WEB_HOSTS ?? "").trim().toLowerCase() === "true";
+const configuredAllowedHosts = (process.env.T3CODE_ALLOWED_HOSTS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
+const defaultAllowedHosts = ["localhost", "127.0.0.1", "::1"];
+const allowedHosts = allowAllHosts
+  ? true
+  : [...new Set([...defaultAllowedHosts, ...configuredAllowedHosts])];
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
 
 const buildSourcemap =
@@ -41,6 +54,8 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    host,
+    allowedHosts,
     port,
     strictPort: true,
     hmr: {
@@ -48,7 +63,7 @@ export default defineConfig({
       // inside Electron's BrowserWindow. Vite 8 uses console.debug for
       // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host: "localhost",
+      host: hmrHost,
     },
   },
   build: {
