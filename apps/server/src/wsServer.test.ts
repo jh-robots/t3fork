@@ -1662,6 +1662,10 @@ describe("WebSocket Server", () => {
           flags: {
             askUserWorkflow: false,
             richImageRendering: true,
+            streamlinedHeaderActions: true,
+            mobileTerminalViewport: true,
+            mobileFullscreenViewport: true,
+            mobileInAppNotifications: false,
           },
         },
         null,
@@ -1684,6 +1688,10 @@ describe("WebSocket Server", () => {
         flags: {
           askUserWorkflow: false,
           richImageRendering: true,
+          streamlinedHeaderActions: true,
+          mobileTerminalViewport: true,
+          mobileFullscreenViewport: true,
+          mobileInAppNotifications: false,
         },
         source: "managed-manifest",
         sourcePath: manifestPath,
@@ -1849,6 +1857,86 @@ describe("WebSocket Server", () => {
       threadId,
       revision: 3,
       entry: null,
+    });
+  });
+
+  it("publishes explicit JH notifications over the management route", async () => {
+    server = await createTestServer({
+      cwd: "/test/notify-project",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await requestPath(port, "/jh/notify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: "JH Code",
+        body: "Mobile notification sample",
+        subtitle: "Separate thread complete",
+        threadId: welcome.data.bootstrapThreadId,
+        projectId: welcome.data.bootstrapProjectId,
+        tone: "success",
+        iconUrl: "https://example.com/icon.png",
+        glyph: "?",
+        accent: "teal",
+        requireInteraction: true,
+        actions: [
+          {
+            label: "Open thread",
+            kind: "open-thread",
+            threadId: welcome.data.bootstrapThreadId,
+          },
+          {
+            label: "Docs",
+            kind: "open-url",
+            url: "https://example.com/docs",
+          },
+        ],
+        tag: "jh-notification-sample",
+      }),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      tag: "jh-notification-sample",
+    });
+
+    const push = await waitForPush(
+      ws,
+      WS_CHANNELS.jhNotificationTriggered,
+      (message) => message.data.tag === "jh-notification-sample",
+    );
+    expect(push.data).toEqual({
+      title: "JH Code",
+      body: "Mobile notification sample",
+      subtitle: "Separate thread complete",
+      threadId: welcome.data.bootstrapThreadId,
+      projectId: welcome.data.bootstrapProjectId,
+      tone: "success",
+      iconUrl: "https://example.com/icon.png",
+      glyph: "?",
+      accent: "teal",
+      requireInteraction: true,
+      actions: [
+        {
+          label: "Open thread",
+          kind: "open-thread",
+          threadId: welcome.data.bootstrapThreadId,
+        },
+        {
+          label: "Docs",
+          kind: "open-url",
+          url: "https://example.com/docs",
+        },
+      ],
+      tag: "jh-notification-sample",
     });
   });
 

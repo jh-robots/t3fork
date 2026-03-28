@@ -39,6 +39,7 @@ import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
 import { JhComposerPrefillUpdatedPayload } from "./jhComposer";
+import { JhNotificationTriggeredPayload } from "./jhNotification";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -84,6 +85,7 @@ export const WS_METHODS = {
 export const WS_CHANNELS = {
   gitActionProgress: "git.actionProgress",
   jhComposerPrefillUpdated: "jh.composerPrefillUpdated",
+  jhNotificationTriggered: "jh.notificationTriggered",
   terminalEvent: "terminal.event",
   serverWelcome: "server.welcome",
   serverConfigUpdated: "server.configUpdated",
@@ -178,6 +180,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.serverConfigUpdated]: typeof ServerConfigUpdatedPayload.Type;
   readonly [WS_CHANNELS.gitActionProgress]: typeof GitActionProgressEvent.Type;
   readonly [WS_CHANNELS.jhComposerPrefillUpdated]: typeof JhComposerPrefillUpdatedPayload.Type;
+  readonly [WS_CHANNELS.jhNotificationTriggered]: typeof JhNotificationTriggeredPayload.Type;
   readonly [WS_CHANNELS.terminalEvent]: typeof TerminalEvent.Type;
   readonly [ORCHESTRATION_WS_CHANNELS.domainEvent]: OrchestrationEvent;
 }
@@ -209,6 +212,10 @@ export const WsPushJhComposerPrefillUpdated = makeWsPushSchema(
   WS_CHANNELS.jhComposerPrefillUpdated,
   JhComposerPrefillUpdatedPayload,
 );
+export const WsPushJhNotificationTriggered = makeWsPushSchema(
+  WS_CHANNELS.jhNotificationTriggered,
+  JhNotificationTriggeredPayload,
+);
 export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
 export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
   ORCHESTRATION_WS_CHANNELS.domainEvent,
@@ -218,6 +225,7 @@ export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
 export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.gitActionProgress,
   WS_CHANNELS.jhComposerPrefillUpdated,
+  WS_CHANNELS.jhNotificationTriggered,
   WS_CHANNELS.serverWelcome,
   WS_CHANNELS.serverConfigUpdated,
   WS_CHANNELS.terminalEvent,
@@ -230,6 +238,7 @@ export const WsPush = Schema.Union([
   WsPushServerConfigUpdated,
   WsPushGitActionProgress,
   WsPushJhComposerPrefillUpdated,
+  WsPushJhNotificationTriggered,
   WsPushTerminalEvent,
   WsPushOrchestrationDomainEvent,
 ]);

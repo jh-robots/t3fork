@@ -20,6 +20,17 @@ type ThreadToastData = {
   threadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
+  imageUrl?: string;
+  subtitle?: string;
+  glyph?: string;
+  accent?: "slate" | "teal" | "blue" | "green" | "amber" | "red";
+  actions?: Array<{
+    id?: string;
+    label: string;
+    onClick?: () => void;
+    variant?: "default" | "outline" | "ghost";
+    closeOnClick?: boolean;
+  }>;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -33,6 +44,27 @@ const TOAST_ICONS = {
   loading: LoaderCircleIcon,
   success: CircleCheckIcon,
   warning: TriangleAlertIcon,
+} as const;
+
+const TOAST_ACCENT_STYLES = {
+  amber:
+    "border-amber-500/35 bg-amber-500/12 text-amber-700 ring-amber-500/25 dark:text-amber-200",
+  blue: "border-sky-500/35 bg-sky-500/12 text-sky-700 ring-sky-500/25 dark:text-sky-200",
+  green:
+    "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200",
+  red: "border-rose-500/35 bg-rose-500/12 text-rose-700 ring-rose-500/25 dark:text-rose-200",
+  slate:
+    "border-slate-500/30 bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200",
+  teal: "border-teal-500/35 bg-teal-500/12 text-teal-700 ring-teal-500/25 dark:text-teal-200",
+} as const;
+
+const TOAST_ACCENT_RAIL_STYLES = {
+  amber: "bg-amber-500/80",
+  blue: "bg-sky-500/80",
+  green: "bg-emerald-500/80",
+  red: "bg-rose-500/80",
+  slate: "bg-slate-500/70",
+  teal: "bg-teal-500/80",
 } as const;
 
 type ToastPosition =
@@ -200,7 +232,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) w-full select-none rounded-lg border bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+                "absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) w-full select-none rounded-lg border bg-popover/98 not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 supports-[backdrop-filter]:backdrop-blur-sm [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",
@@ -262,6 +294,15 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
               }
               toast={toast}
             >
+              {toast.data?.accent ? (
+                <div
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-y-0 left-0 w-1 rounded-l-lg",
+                    TOAST_ACCENT_RAIL_STYLES[toast.data.accent],
+                  )}
+                />
+              ) : null}
               <ThreadToastVisibleAutoDismiss
                 dismissAfterVisibleMs={toast.data?.dismissAfterVisibleMs}
                 toastId={toast.id}
@@ -275,15 +316,55 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
               >
                 <div className="flex min-w-0 flex-1 gap-2">
                   {Icon && (
-                    <div
-                      className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
-                      data-slot="toast-icon"
-                    >
-                      <Icon className="in-data-[type=loading]:animate-spin in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
-                    </div>
+                    <>
+                      {toast.data?.imageUrl ? (
+                        <img
+                          alt=""
+                          className="mt-0.5 size-9 shrink-0 rounded-md object-cover ring-1 ring-border/60"
+                          src={toast.data.imageUrl}
+                        />
+                      ) : toast.data?.glyph ? (
+                        <div
+                          className={cn(
+                            "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md border text-xs font-semibold uppercase ring-1",
+                            TOAST_ACCENT_STYLES[toast.data.accent ?? "slate"],
+                          )}
+                        >
+                          {toast.data.glyph}
+                        </div>
+                      ) : (
+                        <div
+                          className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+                          data-slot="toast-icon"
+                        >
+                          <Icon className="in-data-[type=loading]:animate-spin in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
+                        </div>
+                      )}
+                    </>
                   )}
+                  {!Icon && toast.data?.imageUrl ? (
+                    <img
+                      alt=""
+                      className="mt-0.5 size-9 shrink-0 rounded-md object-cover ring-1 ring-border/60"
+                      src={toast.data.imageUrl}
+                    />
+                  ) : !Icon && toast.data?.glyph ? (
+                    <div
+                      className={cn(
+                        "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md border text-xs font-semibold uppercase ring-1",
+                        TOAST_ACCENT_STYLES[toast.data.accent ?? "slate"],
+                      )}
+                    >
+                      {toast.data.glyph}
+                    </div>
+                  ) : null}
 
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    {toast.data?.subtitle ? (
+                      <p className="min-w-0 break-words text-[11px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
+                        {toast.data.subtitle}
+                      </p>
+                    ) : null}
                     <Toast.Title
                       className="min-w-0 break-words font-medium"
                       data-slot="toast-title"
@@ -294,6 +375,31 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     />
                   </div>
                 </div>
+                {toast.data?.actions && toast.data.actions.length > 0 ? (
+                  <div className="flex shrink-0 flex-wrap items-center gap-1">
+                    {toast.data.actions.map((action, actionIndex) => (
+                      <button
+                        type="button"
+                        key={action.id ?? `${toast.id}:${actionIndex}:${action.label}`}
+                        className={cn(
+                          buttonVariants({
+                            size: "xs",
+                            variant: action.variant ?? "outline",
+                          }),
+                          "shrink-0",
+                        )}
+                        onClick={() => {
+                          action.onClick?.();
+                          if (action.closeOnClick ?? true) {
+                            toastManager.close(toast.id);
+                          }
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {toast.actionProps && (
                   <Toast.Action
                     className={cn(buttonVariants({ size: "xs" }), "shrink-0")}

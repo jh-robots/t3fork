@@ -66,6 +66,7 @@ export const JHFeatureFlagOverridesSchema = Schema.Struct({
   streamlinedHeaderActions: Schema.optional(Schema.Boolean),
   mobileTerminalViewport: Schema.optional(Schema.Boolean),
   mobileFullscreenViewport: Schema.optional(Schema.Boolean),
+  mobileInAppNotifications: Schema.optional(Schema.Boolean),
 });
 export type JHFeatureFlagOverrides = typeof JHFeatureFlagOverridesSchema.Type;
 export const DEFAULT_JH_FEATURE_FLAG_OVERRIDES = JHFeatureFlagOverridesSchema.makeUnsafe({});
@@ -184,6 +185,10 @@ export function resolveJhFeatureFlagOverrides(
     overrides.mobileFullscreenViewport === managedDefaults.mobileFullscreenViewport
       ? {}
       : { mobileFullscreenViewport: overrides.mobileFullscreenViewport }),
+    ...(overrides.mobileInAppNotifications === undefined ||
+    overrides.mobileInAppNotifications === managedDefaults.mobileInAppNotifications
+      ? {}
+      : { mobileInAppNotifications: overrides.mobileInAppNotifications }),
   };
 }
 

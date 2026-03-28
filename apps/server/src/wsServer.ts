@@ -16,6 +16,8 @@ import {
   type ClientOrchestrationCommand,
   type JhComposerPrefillRequest,
   JhComposerPrefillRequest as JhComposerPrefillRequestSchema,
+  type JhNotificationTriggerRequest,
+  JhNotificationTriggerRequest as JhNotificationTriggerRequestSchema,
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
@@ -168,6 +170,7 @@ function toPosixRelativePath(input: string): string {
 const LOCAL_FILE_ROUTE_PATH = "/local-file";
 const JH_RUNTIME_CONFIG_ROUTE_PATH = "/jh-runtime-config";
 const JH_THREAD_COMPOSER_ROUTE_PATH = "/jh/thread-composer";
+const JH_NOTIFY_ROUTE_PATH = "/jh/notify";
 
 function readHttpRequestBody(request: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -212,6 +215,14 @@ function decodeJhComposerPrefillRequest(raw: string): JhComposerPrefillRequest |
           } satisfies Record<string, unknown>)
         : parsed;
     return Schema.decodeUnknownSync(JhComposerPrefillRequestSchema)(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function decodeJhNotificationTriggerRequest(raw: string): JhNotificationTriggerRequest | null {
+  try {
+    return Schema.decodeUnknownSync(JhNotificationTriggerRequestSchema)(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -763,6 +774,69 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return;
         }
 
+        if (url.pathname === JH_NOTIFY_ROUTE_PATH) {
+          const commonHeaders = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+          };
+          if (req.method === "OPTIONS") {
+            respond(204, {
+              ...commonHeaders,
+              "Access-Control-Allow-Methods": "POST,OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            });
+            return;
+          }
+
+          if (req.method !== "POST") {
+            respond(405, commonHeaders, JSON.stringify({ error: "Method not allowed." }));
+            return;
+          }
+
+          const requestBodyText = yield* Effect.tryPromise({
+            try: () => readHttpRequestBody(req),
+            catch: () =>
+              new RouteRequestError({
+                message: "Failed to read JH notification request body.",
+              }),
+          });
+          const parsedRequestBody = decodeJhNotificationTriggerRequest(requestBodyText);
+          if (!parsedRequestBody) {
+            respond(400, commonHeaders, JSON.stringify({ error: "Invalid notification body." }));
+            return;
+          }
+
+          const tag =
+            parsedRequestBody.tag ??
+            `jh-notify:${parsedRequestBody.threadId ?? "global"}:${Date.now()}`;
+          yield* pushBus.publishAll(WS_CHANNELS.jhNotificationTriggered, {
+            title: parsedRequestBody.title,
+            body: parsedRequestBody.body,
+            ...(parsedRequestBody.subtitle ? { subtitle: parsedRequestBody.subtitle } : {}),
+            ...(parsedRequestBody.threadId ? { threadId: parsedRequestBody.threadId } : {}),
+            ...(parsedRequestBody.projectId ? { projectId: parsedRequestBody.projectId } : {}),
+            ...(parsedRequestBody.iconUrl ? { iconUrl: parsedRequestBody.iconUrl } : {}),
+            ...(parsedRequestBody.glyph ? { glyph: parsedRequestBody.glyph } : {}),
+            ...(parsedRequestBody.accent ? { accent: parsedRequestBody.accent } : {}),
+            ...(parsedRequestBody.tone ? { tone: parsedRequestBody.tone } : {}),
+            ...(typeof parsedRequestBody.requireInteraction === "boolean"
+              ? { requireInteraction: parsedRequestBody.requireInteraction }
+              : {}),
+            ...(parsedRequestBody.actions ? { actions: parsedRequestBody.actions } : {}),
+            tag,
+          });
+          respond(
+            200,
+            commonHeaders,
+            JSON.stringify({
+              ok: true,
+              tag,
+            }),
+          );
+          return;
+        }
+
         // In dev mode, redirect to Vite dev server
         if (devUrl) {
           respond(302, { Location: devUrl.href });
@@ -846,6 +920,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       if (!res.headersSent) {
         respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
       }
+    });
+  });
+  httpServer.on("error", (error) => {
+    logger.error("http server error", {
+      message: error.message,
+      stack: error.stack,
+    });
+  });
+  httpServer.on("close", () => {
+    logger.warn("http server closed", {
+      port,
+      host,
     });
   });
 

@@ -279,6 +279,7 @@ describe("JH feature flag overrides", () => {
           streamlinedHeaderActions: true,
           mobileTerminalViewport: true,
           mobileFullscreenViewport: true,
+          mobileInAppNotifications: false,
         },
         {
           askUserWorkflow: true,
@@ -286,6 +287,7 @@ describe("JH feature flag overrides", () => {
           streamlinedHeaderActions: true,
           mobileTerminalViewport: true,
           mobileFullscreenViewport: true,
+          mobileInAppNotifications: false,
         },
       ),
     ).toEqual({
@@ -324,6 +326,14 @@ describe("JH feature flag overrides", () => {
           mobileFullscreenViewport: false,
         },
         "mobileFullscreenViewport",
+      ),
+    ).toBe(true);
+    expect(
+      isJhFeatureFlagOverridden(
+        {
+          mobileInAppNotifications: true,
+        },
+        "mobileInAppNotifications",
       ),
     ).toBe(true);
   });

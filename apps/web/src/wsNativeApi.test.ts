@@ -16,36 +16,60 @@ import {
   type ServerProviderStatus,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createWsNativeApi,
+  onJhComposerPrefillUpdated,
+  onJhNotificationTriggered,
+  onServerConfigUpdated,
+  onServerWelcome,
+  resetWsNativeApiForTests,
+} from "./wsNativeApi";
 
-const requestMock = vi.fn<(...args: Array<unknown>) => Promise<unknown>>();
-const showContextMenuFallbackMock =
-  vi.fn<
-    <T extends string>(
-      items: readonly ContextMenuItem<T>[],
-      position?: { x: number; y: number },
-    ) => Promise<T | null>
-  >();
-const channelListeners = new Map<string, Set<(message: WsPush) => void>>();
-const latestPushByChannel = new Map<string, WsPush>();
-const subscribeMock = vi.fn<
-  (
-    channel: string,
-    listener: (message: WsPush) => void,
-    options?: { replayLatest?: boolean },
-  ) => () => void
->((channel, listener, options) => {
-  const listeners = channelListeners.get(channel) ?? new Set<(message: WsPush) => void>();
-  listeners.add(listener);
-  channelListeners.set(channel, listeners);
-  const latest = latestPushByChannel.get(channel);
-  if (latest && options?.replayLatest) {
-    listener(latest);
-  }
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) {
-      channelListeners.delete(channel);
+const {
+  requestMock,
+  showContextMenuFallbackMock,
+  channelListeners,
+  latestPushByChannel,
+  subscribeMock,
+} = vi.hoisted(() => {
+  const requestMock = vi.fn<(...args: Array<unknown>) => Promise<unknown>>();
+  const showContextMenuFallbackMock =
+    vi.fn<
+      <T extends string>(
+        items: readonly ContextMenuItem<T>[],
+        position?: { x: number; y: number },
+      ) => Promise<T | null>
+    >();
+  const channelListeners = new Map<string, Set<(message: WsPush) => void>>();
+  const latestPushByChannel = new Map<string, WsPush>();
+  const subscribeMock = vi.fn<
+    (
+      channel: string,
+      listener: (message: WsPush) => void,
+      options?: { replayLatest?: boolean },
+    ) => () => void
+  >((channel, listener, options) => {
+    const listeners = channelListeners.get(channel) ?? new Set<(message: WsPush) => void>();
+    listeners.add(listener);
+    channelListeners.set(channel, listeners);
+    const latest = latestPushByChannel.get(channel);
+    if (latest && options?.replayLatest) {
+      listener(latest);
     }
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        channelListeners.delete(channel);
+      }
+    };
+  });
+
+  return {
+    requestMock,
+    showContextMenuFallbackMock,
+    channelListeners,
+    latestPushByChannel,
+    subscribeMock,
   };
 });
 
@@ -103,7 +127,7 @@ const defaultProviders: ReadonlyArray<ServerProviderStatus> = [
 ];
 
 beforeEach(() => {
-  vi.resetModules();
+  resetWsNativeApiForTests();
   requestMock.mockReset();
   showContextMenuFallbackMock.mockReset();
   subscribeMock.mockClear();
@@ -119,8 +143,6 @@ afterEach(() => {
 
 describe("wsNativeApi", () => {
   it("delivers and caches valid server.welcome payloads", async () => {
-    const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onServerWelcome(listener);
@@ -139,8 +161,6 @@ describe("wsNativeApi", () => {
   });
 
   it("preserves bootstrap ids from server.welcome payloads", async () => {
-    const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onServerWelcome(listener);
@@ -164,8 +184,6 @@ describe("wsNativeApi", () => {
   });
 
   it("delivers successive server.welcome payloads to active listeners", async () => {
-    const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onServerWelcome(listener);
@@ -183,8 +201,6 @@ describe("wsNativeApi", () => {
   });
 
   it("delivers and caches valid server.configUpdated payloads", async () => {
-    const { createWsNativeApi, onServerConfigUpdated } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onServerConfigUpdated(listener);
@@ -211,8 +227,6 @@ describe("wsNativeApi", () => {
   });
 
   it("delivers successive server.configUpdated payloads to active listeners", async () => {
-    const { createWsNativeApi, onServerConfigUpdated } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onServerConfigUpdated(listener);
@@ -234,8 +248,6 @@ describe("wsNativeApi", () => {
   });
 
   it("delivers and caches JH composer prefill updates", async () => {
-    const { createWsNativeApi, onJhComposerPrefillUpdated } = await import("./wsNativeApi");
-
     createWsNativeApi();
     const listener = vi.fn();
     onJhComposerPrefillUpdated(listener);
@@ -272,9 +284,36 @@ describe("wsNativeApi", () => {
     });
   });
 
-  it("forwards valid terminal and orchestration events", async () => {
-    const { createWsNativeApi } = await import("./wsNativeApi");
+  it("delivers explicit JH notification pushes to active listeners", async () => {
+    createWsNativeApi();
+    const listener = vi.fn();
+    onJhNotificationTriggered(listener);
 
+    emitPush(WS_CHANNELS.jhNotificationTriggered, {
+      title: "JH Code",
+      body: "Notification test",
+      subtitle: "Thread complete",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      glyph: "?",
+      accent: "teal",
+      tag: "jh-test",
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({
+      title: "JH Code",
+      body: "Notification test",
+      subtitle: "Thread complete",
+      threadId: "thread-1",
+      projectId: "project-1",
+      glyph: "?",
+      accent: "teal",
+      tag: "jh-test",
+    });
+  });
+
+  it("forwards valid terminal and orchestration events", async () => {
     const api = createWsNativeApi();
     const onTerminalEvent = vi.fn();
     const onDomainEvent = vi.fn();
@@ -341,7 +380,6 @@ describe("wsNativeApi", () => {
 
   it("wraps orchestration dispatch commands in the command envelope", async () => {
     requestMock.mockResolvedValue(undefined);
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     const command = {
@@ -362,7 +400,6 @@ describe("wsNativeApi", () => {
 
   it("forwards workspace file writes to the websocket project method", async () => {
     requestMock.mockResolvedValue({ relativePath: "plan.md" });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     await api.projects.writeFile({
@@ -386,8 +423,6 @@ describe("wsNativeApi", () => {
       push: { status: "skipped_not_requested" },
       pr: { status: "skipped_not_requested" },
     });
-    const { createWsNativeApi } = await import("./wsNativeApi");
-
     const api = createWsNativeApi();
     await api.git.runStackedAction({ actionId: "action-1", cwd: "/repo", action: "commit" });
 
@@ -400,7 +435,6 @@ describe("wsNativeApi", () => {
 
   it("forwards full-thread diff requests to the orchestration websocket method", async () => {
     requestMock.mockResolvedValue({ diff: "patch" });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     await api.orchestration.getFullThreadDiff({
@@ -424,7 +458,6 @@ describe("wsNativeApi", () => {
       },
     });
 
-    const { createWsNativeApi } = await import("./wsNativeApi");
     const api = createWsNativeApi();
     await api.contextMenu.show(
       [
@@ -447,7 +480,6 @@ describe("wsNativeApi", () => {
     showContextMenuFallbackMock.mockResolvedValue("delete");
     Reflect.deleteProperty(getWindowForTest(), "desktopBridge");
 
-    const { createWsNativeApi } = await import("./wsNativeApi");
     const api = createWsNativeApi();
     await api.contextMenu.show([{ id: "delete", label: "Delete", destructive: true }], {
       x: 20,

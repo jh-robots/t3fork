@@ -9,6 +9,7 @@ export interface JHRuntimeFeatureFlags {
   streamlinedHeaderActions: boolean;
   mobileTerminalViewport: boolean;
   mobileFullscreenViewport: boolean;
+  mobileInAppNotifications: boolean;
 }
 
 export interface JHRuntimeFeatureFlagsConfig {
@@ -24,6 +25,7 @@ export const DEFAULT_JH_RUNTIME_FEATURE_FLAGS: JHRuntimeFeatureFlags = {
   streamlinedHeaderActions: true,
   mobileTerminalViewport: true,
   mobileFullscreenViewport: true,
+  mobileInAppNotifications: false,
 };
 
 function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
@@ -37,7 +39,8 @@ function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
     typeof candidate.richImageRendering === "boolean" &&
     typeof candidate.streamlinedHeaderActions === "boolean" &&
     typeof candidate.mobileTerminalViewport === "boolean" &&
-    typeof candidate.mobileFullscreenViewport === "boolean"
+    typeof candidate.mobileFullscreenViewport === "boolean" &&
+    typeof candidate.mobileInAppNotifications === "boolean"
   );
 }
 

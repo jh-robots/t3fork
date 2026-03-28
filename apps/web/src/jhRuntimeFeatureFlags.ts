@@ -7,6 +7,7 @@ export const JHFeatureFlagsSchema = Schema.Struct({
   streamlinedHeaderActions: Schema.Boolean,
   mobileTerminalViewport: Schema.Boolean,
   mobileFullscreenViewport: Schema.Boolean,
+  mobileInAppNotifications: Schema.Boolean,
 });
 export type JHFeatureFlags = typeof JHFeatureFlagsSchema.Type;
 export const DEFAULT_JH_FEATURE_FLAGS: JHFeatureFlags = {
@@ -15,6 +16,7 @@ export const DEFAULT_JH_FEATURE_FLAGS: JHFeatureFlags = {
   streamlinedHeaderActions: true,
   mobileTerminalViewport: true,
   mobileFullscreenViewport: true,
+  mobileInAppNotifications: false,
 };
 export type JHFeatureFlagOverrideMap = {
   askUserWorkflow?: boolean | undefined;
@@ -22,6 +24,7 @@ export type JHFeatureFlagOverrideMap = {
   streamlinedHeaderActions?: boolean | undefined;
   mobileTerminalViewport?: boolean | undefined;
   mobileFullscreenViewport?: boolean | undefined;
+  mobileInAppNotifications?: boolean | undefined;
 };
 
 export const JHRuntimeFeatureFlagsConfigSchema = Schema.Struct({
@@ -96,6 +99,8 @@ export function resolveEffectiveJhFeatureFlags(params: {
     mobileFullscreenViewport:
       params.overrides.mobileFullscreenViewport ??
       params.managedDefaults.mobileFullscreenViewport,
+    mobileInAppNotifications:
+      params.overrides.mobileInAppNotifications ?? params.managedDefaults.mobileInAppNotifications,
   };
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -16,6 +16,7 @@ import {
 } from "../appSettings";
 import { APP_VERSION } from "../branding";
 import { Button } from "../components/ui/button";
+import { toastManager } from "../components/ui/toast";
 import { Collapsible, CollapsibleContent } from "../components/ui/collapsible";
 import { Input } from "../components/ui/input";
 import {
@@ -34,10 +35,16 @@ import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import {
   DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
+  type JHFeatureFlags,
   jhRuntimeFeatureFlagQueryKeys,
   jhRuntimeFeatureFlagsQueryOptions,
   resolveEffectiveJhFeatureFlags,
 } from "../jhRuntimeFeatureFlags";
+import {
+  getJhBrowserNotificationPermission,
+  requestJhBrowserNotificationPermission,
+  showJhBrowserNotification,
+} from "../jhInAppNotifications";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
@@ -217,6 +224,9 @@ function SettingsRouteView() {
     Partial<Record<ProviderKind, string | null>>
   >({});
   const [showAllCustomModels, setShowAllCustomModels] = useState(false);
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState(() =>
+    getJhBrowserNotificationPermission(),
+  );
 
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
@@ -288,6 +298,9 @@ function SettingsRouteView() {
       : []),
     ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileFullscreenViewport")
       ? ["JH mobile fullscreen viewport override"]
+      : []),
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileInAppNotifications")
+      ? ["JH mobile in-app notifications override"]
       : []),
     ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
@@ -412,13 +425,12 @@ function SettingsRouteView() {
     setCustomModelErrorByProvider({});
   }
 
+  useEffect(() => {
+    setBrowserNotificationPermission(getJhBrowserNotificationPermission());
+  }, []);
+
   function setJhFeatureFlagOverride(
-    key:
-      | "askUserWorkflow"
-      | "richImageRendering"
-      | "streamlinedHeaderActions"
-      | "mobileTerminalViewport"
-      | "mobileFullscreenViewport",
+    key: keyof JHFeatureFlags,
     enabled: boolean,
   ) {
     updateSettings({
@@ -432,19 +444,43 @@ function SettingsRouteView() {
     });
   }
 
-  function clearJhFeatureFlagOverride(
-    key:
-      | "askUserWorkflow"
-      | "richImageRendering"
-      | "streamlinedHeaderActions"
-      | "mobileTerminalViewport"
-      | "mobileFullscreenViewport",
-  ) {
+  function clearJhFeatureFlagOverride(key: keyof JHFeatureFlags) {
     const nextOverrides = { ...settings.jhFeatureFlags };
     delete nextOverrides[key];
     updateSettings({
       jhFeatureFlags: resolveJhFeatureFlagOverrides(nextOverrides, managedJhFeatureFlags),
     });
+  }
+
+  async function testJhInAppNotification() {
+    const currentPermission = getJhBrowserNotificationPermission();
+    let resolvedPermission = currentPermission;
+
+    if (currentPermission === "default") {
+      resolvedPermission = await requestJhBrowserNotificationPermission();
+      setBrowserNotificationPermission(resolvedPermission);
+    } else {
+      setBrowserNotificationPermission(currentPermission);
+    }
+
+    toastManager.add({
+      type: "info",
+      title: "JH mobile notification test",
+      description: "In-app notifications are wired and ready for event-driven testing.",
+      data: {
+        dismissAfterVisibleMs: 5000,
+      },
+    });
+
+    if (resolvedPermission === "granted") {
+      showJhBrowserNotification({
+        descriptor: {
+          title: "JH Code mobile test",
+          body: "Browser notifications are enabled for this device and origin.",
+          tag: "jh-mobile-notifications-test",
+        },
+      });
+    }
   }
 
   return (
@@ -769,6 +805,54 @@ function SettingsRouteView() {
                   />
                 }
               />
+
+              <SettingsRow
+                title="JH mobile in-app notifications"
+                description="Show JH-owned notifications for assistant replies and pending approvals or questions when you are not actively focused on that thread. Browser notifications are best-effort and stay limited to the current open app session."
+                status={`Managed default: ${managedJhFeatureFlags.mobileInAppNotifications ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileInAppNotifications")
+                    ? effectiveJhFeatureFlags.mobileInAppNotifications
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                } • Browser permission: ${
+                  browserNotificationPermission === "unsupported"
+                    ? "Unsupported"
+                    : browserNotificationPermission
+                }`}
+                resetAction={
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileInAppNotifications") ? (
+                    <SettingResetButton
+                      label="JH mobile in-app notifications override"
+                      onClick={() => clearJhFeatureFlagOverride("mobileInAppNotifications")}
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={effectiveJhFeatureFlags.mobileInAppNotifications}
+                    onCheckedChange={(checked) =>
+                      setJhFeatureFlagOverride("mobileInAppNotifications", Boolean(checked))
+                    }
+                    aria-label="Enable JH mobile in-app notifications"
+                  />
+                }
+              >
+                <div className="mt-4 border-t border-border pt-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Use this to validate the browser permission path before the event-driven MVP is exercised on mobile.
+                    </p>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => void testJhInAppNotification()}
+                    >
+                      Test notification
+                    </Button>
+                  </div>
+                </div>
+              </SettingsRow>
 
               <SettingsRow
                 title="JH managed defaults"

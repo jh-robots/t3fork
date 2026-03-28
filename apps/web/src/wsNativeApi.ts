@@ -1,6 +1,7 @@
 import {
   type GitActionProgressEvent,
   type JhComposerPrefillUpdatedPayload,
+  type JhNotificationTriggeredPayload,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
   type ContextMenuItem,
@@ -20,6 +21,9 @@ const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayloa
 const gitActionProgressListeners = new Set<(payload: GitActionProgressEvent) => void>();
 const jhComposerPrefillUpdatedListeners = new Set<
   (payload: JhComposerPrefillUpdatedPayload) => void
+>();
+const jhNotificationTriggeredListeners = new Set<
+  (payload: JhNotificationTriggeredPayload) => void
 >();
 
 /**
@@ -88,6 +92,16 @@ export function onJhComposerPrefillUpdated(
   };
 }
 
+export function onJhNotificationTriggered(
+  listener: (payload: JhNotificationTriggeredPayload) => void,
+): () => void {
+  jhNotificationTriggeredListeners.add(listener);
+
+  return () => {
+    jhNotificationTriggeredListeners.delete(listener);
+  };
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) return instance.api;
 
@@ -126,6 +140,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_CHANNELS.jhComposerPrefillUpdated, (message) => {
     const payload = message.data;
     for (const listener of jhComposerPrefillUpdatedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(WS_CHANNELS.jhNotificationTriggered, (message) => {
+    const payload = message.data;
+    for (const listener of jhNotificationTriggeredListeners) {
       try {
         listener(payload);
       } catch {
@@ -232,4 +256,13 @@ export function createWsNativeApi(): NativeApi {
 
   instance = { api, transport };
   return api;
+}
+
+export function resetWsNativeApiForTests(): void {
+  instance = null;
+  welcomeListeners.clear();
+  serverConfigUpdatedListeners.clear();
+  gitActionProgressListeners.clear();
+  jhComposerPrefillUpdatedListeners.clear();
+  jhNotificationTriggeredListeners.clear();
 }

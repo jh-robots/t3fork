@@ -5,6 +5,7 @@ export * from "./provider";
 export * from "./providerRuntime";
 export * from "./model";
 export * from "./jhComposer";
+export * from "./jhNotification";
 export * from "./ws";
 export * from "./keybindings";
 export * from "./server";

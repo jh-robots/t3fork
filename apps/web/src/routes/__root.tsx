@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { type OrchestrationEvent, ThreadId } from "@t3tools/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -7,9 +7,8 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
-
 import { APP_DISPLAY_NAME } from "../branding";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
@@ -20,10 +19,21 @@ import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDra
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
-import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
+import { onJhNotificationTriggered, onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import { useAppSettings } from "../appSettings";
+import {
+  DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
+  jhRuntimeFeatureFlagsQueryOptions,
+  resolveEffectiveJhFeatureFlags,
+} from "../jhRuntimeFeatureFlags";
+import {
+  buildJhInAppNotificationDescriptor,
+  shouldDispatchJhInAppNotification,
+  showJhBrowserNotification,
+} from "../jhInAppNotifications";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -131,6 +141,7 @@ function errorDetails(error: unknown): string {
 }
 
 function EventRouter() {
+  const { settings } = useAppSettings();
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -139,8 +150,16 @@ function EventRouter() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const jhRuntimeFeatureFlagsQuery = useQuery(jhRuntimeFeatureFlagsQueryOptions());
   const pathnameRef = useRef(pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const toastIdsByTagRef = useRef(new Map<string, ReturnType<typeof toastManager.add>>());
+  const browserNotificationsByTagRef = useRef(new Map<string, Notification>());
+  const effectiveJhFeatureFlags = resolveEffectiveJhFeatureFlags({
+    managedDefaults:
+      jhRuntimeFeatureFlagsQuery.data?.flags ?? DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG.flags,
+    overrides: settings.jhFeatureFlags,
+  });
 
   pathnameRef.current = pathname;
 
@@ -152,6 +171,8 @@ function EventRouter() {
     let syncing = false;
     let pending = false;
     let needsProviderInvalidation = false;
+    const toastIdsByTag = toastIdsByTagRef.current;
+    const browserNotificationsByTag = browserNotificationsByTagRef.current;
 
     const flushSnapshotSync = async (): Promise<void> => {
       const snapshot = await api.orchestration.getSnapshot();
@@ -206,11 +227,239 @@ function EventRouter() {
       },
     );
 
+    const navigateToThread = (threadId: string) =>
+      navigate({
+        to: "/$threadId",
+        params: { threadId },
+      }).catch(() => undefined);
+
+    const showTaggedToast = (params: Parameters<typeof toastManager.add>[0] & { tag: string }) => {
+      const previousToastId = toastIdsByTag.get(params.tag);
+      if (previousToastId !== undefined) {
+        toastManager.close(previousToastId);
+      }
+      const nextToastId = toastManager.add(params);
+      toastIdsByTag.set(params.tag, nextToastId);
+    };
+
+    const showTaggedBrowserNotification = (params: {
+      tag: string;
+      descriptor: Parameters<typeof showJhBrowserNotification>[0]["descriptor"];
+      onClick?: Parameters<typeof showJhBrowserNotification>[0]["onClick"];
+    }) => {
+      const previousNotification = browserNotificationsByTag.get(params.tag);
+      previousNotification?.close();
+      const notification = showJhBrowserNotification({
+        descriptor: params.descriptor,
+        ...(params.onClick ? { onClick: params.onClick } : {}),
+      });
+      if (notification) {
+        browserNotificationsByTag.set(params.tag, notification);
+      }
+    };
+
+    const maybeNotifyForDomainEvent = (event: OrchestrationEvent) => {
+      if (!effectiveJhFeatureFlags.mobileInAppNotifications) {
+        return;
+      }
+
+      if (typeof document === "undefined") {
+        return;
+      }
+
+      const state = useStore.getState();
+      const descriptor = buildJhInAppNotificationDescriptor({
+        event,
+        threads: state.threads,
+        projects: state.projects,
+      });
+      if (!descriptor) {
+        return;
+      }
+
+      const activeThreadId =
+        pathnameRef.current.startsWith("/") && pathnameRef.current.split("/").length === 2
+          ? ThreadId.makeUnsafe(pathnameRef.current.slice(1))
+          : null;
+      const shouldNotify = shouldDispatchJhInAppNotification({
+        targetThreadId: descriptor.threadId,
+        activeThreadId,
+        pathname: pathnameRef.current,
+        documentVisibilityState: document.visibilityState,
+        hasDocumentFocus: document.hasFocus(),
+      });
+      if (!shouldNotify) {
+        return;
+      }
+
+      if (document.visibilityState === "visible") {
+        showTaggedToast({
+          tag: descriptor.tag,
+          type: descriptor.tone,
+          title: descriptor.toastTitle,
+          description: descriptor.toastDescription,
+          data: {
+            dismissAfterVisibleMs: 8000,
+            ...(descriptor.toastSubtitle ? { subtitle: descriptor.toastSubtitle } : {}),
+            ...(descriptor.glyph ? { glyph: descriptor.glyph } : {}),
+            ...(descriptor.accent ? { accent: descriptor.accent } : {}),
+          },
+          actionProps: {
+            children: "Open",
+            onClick: () => {
+              void navigateToThread(descriptor.threadId);
+            },
+          },
+        });
+      } else {
+        showTaggedBrowserNotification({
+          tag: descriptor.tag,
+          descriptor: {
+            ...descriptor,
+            body: descriptor.toastSubtitle
+              ? `${descriptor.toastSubtitle} - ${descriptor.body}`
+              : descriptor.body,
+          },
+          onClick: () => {
+            window.focus();
+            void navigateToThread(descriptor.threadId);
+          },
+        });
+      }
+    };
+
+    const maybeShowExplicitJhNotification = (payload: {
+      title: string;
+      body: string;
+      subtitle?: string;
+      threadId?: string;
+      tag: string;
+      iconUrl?: string;
+      glyph?: string;
+      accent?: "slate" | "teal" | "blue" | "green" | "amber" | "red";
+      tone?: "info" | "success" | "warning" | "error";
+      requireInteraction?: boolean;
+      actions?: ReadonlyArray<{
+        id?: string;
+        label: string;
+        kind: "open-thread" | "open-url" | "dismiss";
+        threadId?: string;
+        url?: string;
+      }>;
+    }) => {
+      if (!effectiveJhFeatureFlags.mobileInAppNotifications || typeof document === "undefined") {
+        return;
+      }
+
+      const activeThreadId =
+        pathnameRef.current.startsWith("/") && pathnameRef.current.split("/").length === 2
+          ? ThreadId.makeUnsafe(pathnameRef.current.slice(1))
+          : null;
+      const targetThreadId = payload.threadId ? ThreadId.makeUnsafe(payload.threadId) : null;
+      const shouldNotify =
+        targetThreadId === null
+          ? document.visibilityState !== "visible" || !document.hasFocus()
+          : shouldDispatchJhInAppNotification({
+              targetThreadId,
+              activeThreadId,
+              pathname: pathnameRef.current,
+              documentVisibilityState: document.visibilityState,
+              hasDocumentFocus: document.hasFocus(),
+            });
+      if (!shouldNotify) {
+        return;
+      }
+
+      const actionButtons =
+        payload.actions?.map((action) => ({
+          ...(action.id ? { id: action.id } : {}),
+          label: action.label,
+          variant: "outline" as const,
+          onClick: () => {
+            if (action.kind === "open-thread" && action.threadId) {
+              void navigateToThread(action.threadId);
+              return;
+            }
+            if (action.kind === "open-url" && action.url) {
+              void api.shell.openExternal(action.url);
+            }
+          },
+        })) ?? [];
+      const browserAction =
+        payload.actions?.find(
+          (action) =>
+            (action.kind === "open-url" && action.url) ||
+            (action.kind === "open-thread" && action.threadId),
+        ) ??
+        (targetThreadId
+          ? {
+              kind: "open-thread" as const,
+              threadId: targetThreadId,
+            }
+          : null);
+
+      if (document.visibilityState === "visible") {
+        showTaggedToast({
+          tag: payload.tag,
+          type: payload.tone ?? "info",
+          title: payload.title,
+          description: payload.body,
+          data: {
+            ...(!payload.requireInteraction ? { dismissAfterVisibleMs: 8000 } : {}),
+            ...(payload.iconUrl ? { imageUrl: payload.iconUrl } : {}),
+            ...(payload.subtitle ? { subtitle: payload.subtitle } : {}),
+            ...(payload.glyph ? { glyph: payload.glyph } : {}),
+            ...(payload.accent ? { accent: payload.accent } : {}),
+            ...(actionButtons.length > 0 ? { actions: actionButtons } : {}),
+          },
+          ...(targetThreadId
+            ? {
+                actionProps: {
+                  children: "Open",
+                  onClick: () => {
+                    void navigateToThread(targetThreadId);
+                  },
+                },
+              }
+            : {}),
+        });
+        return;
+      }
+
+      showTaggedBrowserNotification({
+        tag: payload.tag,
+        descriptor: {
+          title: payload.title,
+          body: payload.subtitle ? `${payload.subtitle} - ${payload.body}` : payload.body,
+          tag: payload.tag,
+          ...(payload.iconUrl ? { icon: payload.iconUrl } : {}),
+          ...(typeof payload.requireInteraction === "boolean"
+            ? { requireInteraction: payload.requireInteraction }
+            : {}),
+        },
+        ...(browserAction
+          ? {
+              onClick: () => {
+                window.focus();
+                if (browserAction.kind === "open-url" && browserAction.url) {
+                  void api.shell.openExternal(browserAction.url);
+                  return;
+                }
+                if (browserAction.kind === "open-thread" && browserAction.threadId) {
+                  void navigateToThread(browserAction.threadId);
+                }
+              },
+            }
+          : {}),
+      });
+    };
+
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
       if (event.sequence <= latestSequence) {
         return;
       }
       latestSequence = event.sequence;
+      maybeNotifyForDomainEvent(event);
       if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
         needsProviderInvalidation = true;
       }
@@ -300,15 +549,24 @@ function EventRouter() {
         },
       });
     });
+    const unsubJhNotificationTriggered = onJhNotificationTriggered((payload) => {
+      maybeShowExplicitJhNotification(payload);
+    });
     subscribed = true;
     return () => {
       disposed = true;
       needsProviderInvalidation = false;
       domainEventFlushThrottler.cancel();
+      for (const notification of browserNotificationsByTag.values()) {
+        notification.close();
+      }
+      browserNotificationsByTag.clear();
+      toastIdsByTag.clear();
       unsubDomainEvent();
       unsubTerminalEvent();
       unsubWelcome();
       unsubServerConfigUpdated();
+      unsubJhNotificationTriggered();
     };
   }, [
     navigate,
@@ -316,6 +574,9 @@ function EventRouter() {
     removeOrphanedTerminalStates,
     setProjectExpanded,
     syncServerReadModel,
+    effectiveJhFeatureFlags.mobileInAppNotifications,
+    jhRuntimeFeatureFlagsQuery.data?.flags,
+    settings.jhFeatureFlags,
   ]);
 
   return null;
