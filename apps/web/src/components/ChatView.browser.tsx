@@ -2,12 +2,13 @@
 import "../index.css";
 
 import {
+  ThreadId,
+  type JhComposerDraftStateResult,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
-  type ThreadId,
   type WsWelcomePayload,
   WS_CHANNELS,
   WS_METHODS,
@@ -54,6 +55,7 @@ interface TestFixture {
 
 let fixture: TestFixture;
 const wsRequests: WsRequestEnvelope["body"][] = [];
+const jhComposerStateByThreadId: Record<string, JhComposerDraftStateResult> = {};
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 interface ViewportSpec {
@@ -490,6 +492,30 @@ const worker = setupWorker(
       },
     }),
   ),
+  http.get("*/jh/thread-composer", ({ request }) => {
+    const url = new URL(request.url);
+    const threadId = url.searchParams.get("thread_id") ?? "";
+    const state = jhComposerStateByThreadId[threadId] ?? {
+      threadId: ThreadId.makeUnsafe(threadId),
+      revision: 0,
+      entry: null,
+    };
+    return HttpResponse.json(state);
+  }),
+  http.delete("*/jh/thread-composer", ({ request }) => {
+    const url = new URL(request.url);
+    const threadId = url.searchParams.get("thread_id") ?? "";
+    const nextRevision = (jhComposerStateByThreadId[threadId]?.revision ?? 0) + 1;
+    jhComposerStateByThreadId[threadId] = {
+      threadId: ThreadId.makeUnsafe(threadId),
+      revision: nextRevision,
+      entry: null,
+    };
+    return HttpResponse.json({
+      ok: true,
+      revision: nextRevision,
+    });
+  }),
   http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
 );
 
@@ -813,10 +839,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
     localStorage.clear();
     document.body.innerHTML = "";
     wsRequests.length = 0;
+    for (const key of Object.keys(jhComposerStateByThreadId)) {
+      delete jhComposerStateByThreadId[key];
+    }
     useComposerDraftStore.setState({
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
+      managedPrefillRevisionByThreadId: {},
       stickyModel: null,
       stickyModelOptions: {},
     });
@@ -863,6 +893,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }
     },
   );
+
+  it("prefills the visible composer from the JH management draft state without sending", async () => {
+    jhComposerStateByThreadId[THREAD_ID] = {
+      threadId: THREAD_ID,
+      revision: 1,
+      entry: {
+        projectId: PROJECT_ID,
+        threadId: THREAD_ID,
+        draftId: "draft-prefill-1",
+        text: "Prefilled orchestration draft",
+        mode: "replace",
+        revision: 1,
+        updatedAt: NOW_ISO,
+        metadata: {
+          source: "t3-task-orchestrator",
+          task_id: "task-123",
+          mode: "create_only",
+        },
+      },
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-prefill-target" as MessageId,
+        targetText: "prefill target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      await vi.waitFor(
+        () => {
+          expect(composerEditor.textContent).toContain("Prefilled orchestration draft");
+          expect(
+            wsRequests.some((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand),
+          ).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 
   it("tracks wrapping parity while resizing an existing ChatView across the viewport matrix", async () => {
     const userText = "x".repeat(3_200);

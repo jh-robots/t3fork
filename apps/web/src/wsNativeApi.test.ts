@@ -233,6 +233,45 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("delivers and caches JH composer prefill updates", async () => {
+    const { createWsNativeApi, onJhComposerPrefillUpdated } = await import("./wsNativeApi");
+
+    createWsNativeApi();
+    const listener = vi.fn();
+    onJhComposerPrefillUpdated(listener);
+
+    emitPush(WS_CHANNELS.jhComposerPrefillUpdated, {
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      draftId: "draft-1",
+      revision: 1,
+      cleared: false,
+      updatedAt: "2026-03-27T00:00:00.000Z",
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      projectId: "project-1",
+      draftId: "draft-1",
+      revision: 1,
+      cleared: false,
+      updatedAt: "2026-03-27T00:00:00.000Z",
+    });
+
+    const lateListener = vi.fn();
+    onJhComposerPrefillUpdated(lateListener);
+    expect(lateListener).toHaveBeenCalledTimes(1);
+    expect(lateListener).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      projectId: "project-1",
+      draftId: "draft-1",
+      revision: 1,
+      cleared: false,
+      updatedAt: "2026-03-27T00:00:00.000Z",
+    });
+  });
+
   it("forwards valid terminal and orchestration events", async () => {
     const { createWsNativeApi } = await import("./wsNativeApi");
 

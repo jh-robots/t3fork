@@ -1,5 +1,6 @@
 import {
   type GitActionProgressEvent,
+  type JhComposerPrefillUpdatedPayload,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
   type ContextMenuItem,
@@ -17,6 +18,9 @@ let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();
 const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayload) => void>();
 const gitActionProgressListeners = new Set<(payload: GitActionProgressEvent) => void>();
+const jhComposerPrefillUpdatedListeners = new Set<
+  (payload: JhComposerPrefillUpdatedPayload) => void
+>();
 
 /**
  * Subscribe to the server welcome message. If a welcome was already received
@@ -64,6 +68,26 @@ export function onServerConfigUpdated(
   };
 }
 
+export function onJhComposerPrefillUpdated(
+  listener: (payload: JhComposerPrefillUpdatedPayload) => void,
+): () => void {
+  jhComposerPrefillUpdatedListeners.add(listener);
+
+  const latestPrefillUpdate =
+    instance?.transport.getLatestPush(WS_CHANNELS.jhComposerPrefillUpdated)?.data ?? null;
+  if (latestPrefillUpdate) {
+    try {
+      listener(latestPrefillUpdate);
+    } catch {
+      // Swallow listener errors
+    }
+  }
+
+  return () => {
+    jhComposerPrefillUpdatedListeners.delete(listener);
+  };
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) return instance.api;
 
@@ -92,6 +116,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_CHANNELS.gitActionProgress, (message) => {
     const payload = message.data;
     for (const listener of gitActionProgressListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(WS_CHANNELS.jhComposerPrefillUpdated, (message) => {
+    const payload = message.data;
+    for (const listener of jhComposerPrefillUpdatedListeners) {
       try {
         listener(payload);
       } catch {

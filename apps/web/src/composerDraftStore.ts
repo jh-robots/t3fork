@@ -146,6 +146,7 @@ interface ComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, ComposerThreadDraftState>;
   draftThreadsByThreadId: Record<ThreadId, DraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
+  managedPrefillRevisionByThreadId: Record<ThreadId, number>;
   stickyModel: string | null;
   stickyModelOptions: ProviderModelOptions;
   getDraftThreadByProjectId: (projectId: ProjectId) => ProjectDraftThread | null;
@@ -179,6 +180,8 @@ interface ComposerDraftStoreState {
   clearDraftThread: (threadId: ThreadId) => void;
   setStickyModel: (model: string | null | undefined) => void;
   setStickyModelOptions: (modelOptions: ProviderModelOptions | null | undefined) => void;
+  applyManagedPrefill: (threadId: ThreadId, prompt: string, revision: number) => void;
+  clearManagedPrefill: (threadId: ThreadId, revision: number) => void;
   setPrompt: (threadId: ThreadId, prompt: string) => void;
   setTerminalContexts: (threadId: ThreadId, contexts: TerminalContextDraft[]) => void;
   setProvider: (threadId: ThreadId, provider: ProviderKind | null | undefined) => void;
@@ -972,6 +975,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
+      managedPrefillRevisionByThreadId: {},
       stickyModel: null,
       stickyModelOptions: EMPTY_PROVIDER_MODEL_OPTIONS,
       getDraftThreadByProjectId: (projectId) => {
@@ -1212,10 +1216,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             state.draftThreadsByThreadId;
           const { [threadId]: _removedComposerDraft, ...restDraftsByThreadId } =
             state.draftsByThreadId;
+          const { [threadId]: _removedManagedPrefillRevision, ...restManagedPrefillRevision } =
+            state.managedPrefillRevisionByThreadId;
           return {
             draftsByThreadId: restDraftsByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
+            managedPrefillRevisionByThreadId: restManagedPrefillRevision,
           };
         });
       },
@@ -1239,6 +1246,66 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           return {
             stickyModelOptions: normalizedModelOptions,
+          };
+        });
+      },
+      applyManagedPrefill: (threadId, prompt, revision) => {
+        if (threadId.length === 0 || !Number.isFinite(revision) || revision < 0) {
+          return;
+        }
+        set((state) => {
+          const currentRevision = state.managedPrefillRevisionByThreadId[threadId] ?? 0;
+          if (revision <= currentRevision) {
+            return state;
+          }
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          const nextDraft: ComposerThreadDraftState = {
+            ...existing,
+            prompt,
+          };
+          const nextDraftsByThreadId = { ...state.draftsByThreadId };
+          if (shouldRemoveDraft(nextDraft)) {
+            delete nextDraftsByThreadId[threadId];
+          } else {
+            nextDraftsByThreadId[threadId] = nextDraft;
+          }
+          return {
+            draftsByThreadId: nextDraftsByThreadId,
+            managedPrefillRevisionByThreadId: {
+              ...state.managedPrefillRevisionByThreadId,
+              [threadId]: revision,
+            },
+          };
+        });
+      },
+      clearManagedPrefill: (threadId, revision) => {
+        if (threadId.length === 0 || !Number.isFinite(revision) || revision < 0) {
+          return;
+        }
+        set((state) => {
+          const currentRevision = state.managedPrefillRevisionByThreadId[threadId] ?? 0;
+          if (revision <= currentRevision) {
+            return state;
+          }
+          const existing = state.draftsByThreadId[threadId];
+          const nextDraft = existing
+            ? ({
+                ...existing,
+                prompt: "",
+              } satisfies ComposerThreadDraftState)
+            : null;
+          const nextDraftsByThreadId = { ...state.draftsByThreadId };
+          if (nextDraft && !shouldRemoveDraft(nextDraft)) {
+            nextDraftsByThreadId[threadId] = nextDraft;
+          } else {
+            delete nextDraftsByThreadId[threadId];
+          }
+          return {
+            draftsByThreadId: nextDraftsByThreadId,
+            managedPrefillRevisionByThreadId: {
+              ...state.managedPrefillRevisionByThreadId,
+              [threadId]: revision,
+            },
           };
         });
       },

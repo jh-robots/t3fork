@@ -134,6 +134,10 @@ import {
   DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
   jhRuntimeFeatureFlagsQueryOptions,
   resolveEffectiveJhFeatureFlags,
+import {
+  clearJhThreadComposerState,
+  fetchJhThreadComposerState,
+} from "../jhComposerPrefill";
 } from "../jhRuntimeFeatureFlags";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -193,6 +197,7 @@ import { useLocalStorage } from "~/hooks/useLocalStorage";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+import { onJhComposerPrefillUpdated } from "../wsNativeApi";
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
@@ -334,6 +339,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const applyManagedComposerPrefill = useComposerDraftStore((store) => store.applyManagedPrefill);
+  const clearManagedComposerPrefill = useComposerDraftStore((store) => store.clearManagedPrefill);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
@@ -463,6 +470,39 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setPrompt = useCallback(
     (nextPrompt: string) => {
       setComposerDraftPrompt(threadId, nextPrompt);
+  useEffect(() => {
+    let disposed = false;
+
+    const syncManagedComposerPrefill = async () => {
+      const state = await fetchJhThreadComposerState(threadId);
+      if (!state || disposed) {
+        return;
+      }
+      const currentRevision =
+        useComposerDraftStore.getState().managedPrefillRevisionByThreadId[threadId] ?? 0;
+      if (state.revision <= currentRevision) {
+        return;
+      }
+      if (state.entry) {
+        applyManagedComposerPrefill(threadId, state.entry.text, state.revision);
+        return;
+      }
+      clearManagedComposerPrefill(threadId, state.revision);
+    };
+
+    void syncManagedComposerPrefill();
+    const unsubscribe = onJhComposerPrefillUpdated((payload) => {
+      if (payload.threadId !== threadId) {
+        return;
+      }
+      void syncManagedComposerPrefill();
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [applyManagedComposerPrefill, clearManagedComposerPrefill, threadId]);
+
     },
     [setComposerDraftPrompt, threadId],
   );
@@ -2773,6 +2813,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
+      void clearJhThreadComposerState(threadIdForSend);
       setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
     [activeThreadId, setStoreThreadError],

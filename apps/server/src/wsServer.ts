@@ -14,6 +14,8 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ClientOrchestrationCommand,
+  type JhComposerPrefillRequest,
+  JhComposerPrefillRequest as JhComposerPrefillRequestSchema,
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
@@ -79,6 +81,11 @@ import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 import { loadJhRuntimeFeatureFlags } from "./jhRuntimeFeatureFlags.ts";
+import {
+  clearJhComposerDraftState,
+  readJhComposerDraftState,
+  upsertJhComposerDraftState,
+} from "./jhComposerPrefillStore.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -160,6 +167,55 @@ function toPosixRelativePath(input: string): string {
 
 const LOCAL_FILE_ROUTE_PATH = "/local-file";
 const JH_RUNTIME_CONFIG_ROUTE_PATH = "/jh-runtime-config";
+const JH_THREAD_COMPOSER_ROUTE_PATH = "/jh/thread-composer";
+
+function readHttpRequestBody(request: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    request.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    request.on("error", reject);
+  });
+}
+
+function decodeJhComposerPrefillRequest(raw: string): JhComposerPrefillRequest | null {
+  try {
+    const parsed = JSON.parse(raw);
+    const candidate =
+      parsed && typeof parsed === "object"
+        ? ({
+            ...parsed,
+            ...(!("projectId" in parsed) && "project_id" in parsed
+              ? { projectId: (parsed as Record<string, unknown>).project_id }
+              : {}),
+            ...(!("threadId" in parsed) && "thread_id" in parsed
+              ? { threadId: (parsed as Record<string, unknown>).thread_id }
+              : {}),
+            ...(
+              "metadata" in parsed &&
+              parsed.metadata &&
+              typeof parsed.metadata === "object" &&
+              !("task_id" in (parsed.metadata as Record<string, unknown>)) &&
+              "taskId" in (parsed.metadata as Record<string, unknown>)
+                ? {
+                    metadata: {
+                      ...(parsed.metadata as Record<string, unknown>),
+                      task_id: (parsed.metadata as Record<string, unknown>).taskId,
+                    },
+                  }
+                : {}
+            ),
+          } satisfies Record<string, unknown>)
+        : parsed;
+    return Schema.decodeUnknownSync(JhComposerPrefillRequestSchema)(candidate);
+  } catch {
+    return null;
+  }
+}
 
 function normalizeRequestedLocalFilePath(input: string): string {
   if (/^\/[A-Za-z]:[\\/]/.test(input)) {
@@ -555,6 +611,155 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             },
             JSON.stringify(jhRuntimeConfig),
           );
+          return;
+        }
+
+        if (url.pathname === JH_THREAD_COMPOSER_ROUTE_PATH) {
+          const commonHeaders = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+          };
+          if (req.method === "OPTIONS") {
+            respond(204, {
+              ...commonHeaders,
+              "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            });
+            return;
+          }
+
+          const threadIdParam = url.searchParams.get("thread_id")?.trim() ?? "";
+
+          const findThread = Effect.fn(function* (input: {
+            threadId: string;
+            projectId?: ProjectId;
+          }) {
+            if (input.threadId.length === 0) {
+              return null;
+            }
+            const snapshot = yield* projectionReadModelQuery.getSnapshot();
+            return (
+              snapshot.threads.find(
+                (thread) =>
+                  thread.id === input.threadId &&
+                  thread.deletedAt === null &&
+                  (input.projectId === undefined || thread.projectId === input.projectId),
+              ) ?? null
+            );
+          });
+
+          if (req.method === "GET") {
+            if (threadIdParam.length === 0) {
+              respond(
+                400,
+                commonHeaders,
+                JSON.stringify({ error: "Missing required thread_id query parameter." }),
+              );
+              return;
+            }
+            const normalizedThreadId = ThreadId.makeUnsafe(threadIdParam);
+            const existingThread = yield* findThread({ threadId: normalizedThreadId });
+            if (!existingThread) {
+              respond(404, commonHeaders, JSON.stringify({ error: "Thread not found." }));
+              return;
+            }
+            const state = yield* readJhComposerDraftState({
+              stateDir: serverConfig.stateDir,
+              fileSystem,
+              path,
+              threadId: normalizedThreadId,
+            });
+            respond(200, commonHeaders, JSON.stringify(state));
+            return;
+          }
+
+          if (req.method === "POST") {
+            const requestBodyText = yield* Effect.tryPromise({
+              try: () => readHttpRequestBody(req),
+              catch: () =>
+                new RouteRequestError({
+                  message: "Failed to read composer prefill request body.",
+                }),
+            });
+            const parsedRequestBody = decodeJhComposerPrefillRequest(requestBodyText);
+            if (!parsedRequestBody) {
+              respond(400, commonHeaders, JSON.stringify({ error: "Invalid composer prefill body." }));
+              return;
+            }
+            const existingThread = yield* findThread({
+              threadId: parsedRequestBody.threadId,
+              projectId: parsedRequestBody.projectId,
+            });
+            if (!existingThread) {
+              respond(
+                404,
+                commonHeaders,
+                JSON.stringify({ error: "Thread not found for the supplied project_id." }),
+              );
+              return;
+            }
+            const entry = yield* upsertJhComposerDraftState({
+              stateDir: serverConfig.stateDir,
+              fileSystem,
+              path,
+              prefill: parsedRequestBody,
+            });
+            yield* pushBus.publishAll(WS_CHANNELS.jhComposerPrefillUpdated, {
+              threadId: entry.threadId,
+              projectId: entry.projectId,
+              draftId: entry.draftId,
+              revision: entry.revision,
+              cleared: false,
+              updatedAt: entry.updatedAt,
+            });
+            respond(
+              200,
+              commonHeaders,
+              JSON.stringify({
+                ok: true,
+                draftId: entry.draftId,
+                revision: entry.revision,
+              }),
+            );
+            return;
+          }
+
+          if (req.method === "DELETE") {
+            if (threadIdParam.length === 0) {
+              respond(
+                400,
+                commonHeaders,
+                JSON.stringify({ error: "Missing required thread_id query parameter." }),
+              );
+              return;
+            }
+            const normalizedThreadId = ThreadId.makeUnsafe(threadIdParam);
+            const clearResult = yield* clearJhComposerDraftState({
+              stateDir: serverConfig.stateDir,
+              fileSystem,
+              path,
+              threadId: normalizedThreadId,
+            });
+            yield* pushBus.publishAll(WS_CHANNELS.jhComposerPrefillUpdated, {
+              threadId: normalizedThreadId,
+              draftId: null,
+              revision: clearResult.revision,
+              cleared: true,
+              updatedAt: clearResult.updatedAt,
+            });
+            respond(
+              200,
+              commonHeaders,
+              JSON.stringify({
+                ok: true,
+                revision: clearResult.revision,
+              }),
+            );
+            return;
+          }
+
+          respond(405, commonHeaders, JSON.stringify({ error: "Method not allowed." }));
           return;
         }
 

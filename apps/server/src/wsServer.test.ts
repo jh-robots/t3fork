@@ -401,6 +401,11 @@ async function rewriteKeybindingsAndWaitForPush(
 async function requestPath(
   port: number,
   requestPath: string,
+  options?: {
+    method?: "GET" | "POST" | "DELETE";
+    body?: string;
+    headers?: Record<string, string>;
+  },
 ): Promise<{ statusCode: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = Http.request(
@@ -408,7 +413,8 @@ async function requestPath(
         hostname: "127.0.0.1",
         port,
         path: requestPath,
-        method: "GET",
+        method: options?.method ?? "GET",
+        headers: options?.headers,
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -424,6 +430,9 @@ async function requestPath(
       },
     );
     req.once("error", reject);
+    if (options?.body) {
+      req.write(options.body);
+    }
     req.end();
   });
 }
@@ -1687,6 +1696,160 @@ describe("WebSocket Server", () => {
         process.env.JH_CODE_OVERLAY_ROOT = previousOverlayRoot;
       }
     }
+  });
+
+  it("stores, serves, and clears JH composer prefills for existing threads", async () => {
+    server = await createTestServer({
+      cwd: "/test/prefill-project",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const projectId = welcome.data.bootstrapProjectId;
+    const threadId = welcome.data.bootstrapThreadId;
+
+    expect(projectId).toBeDefined();
+    expect(threadId).toBeDefined();
+
+    const replaceResponse = await requestPath(port, "/jh/thread-composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId,
+        threadId,
+        text: "Bootstrap draft",
+        mode: "replace",
+        metadata: {
+          source: "t3-task-orchestrator",
+          task_id: "task-1",
+          mode: "create_only",
+        },
+      }),
+    });
+    expect(replaceResponse.statusCode).toBe(200);
+    expect(JSON.parse(replaceResponse.body)).toEqual({
+      ok: true,
+      draftId: expect.any(String),
+      revision: 1,
+    });
+
+    const replacePush = await waitForPush(
+      ws,
+      WS_CHANNELS.jhComposerPrefillUpdated,
+      (push) => push.data.threadId === threadId && push.data.cleared === false,
+    );
+    expect(replacePush.data).toEqual({
+      threadId,
+      projectId,
+      draftId: expect.any(String),
+      revision: 1,
+      cleared: false,
+      updatedAt: expect.any(String),
+    });
+
+    const stateAfterReplace = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(threadId!)}`,
+    );
+    expect(stateAfterReplace.statusCode).toBe(200);
+    expect(JSON.parse(stateAfterReplace.body)).toEqual({
+      threadId,
+      revision: 1,
+      entry: {
+        projectId,
+        threadId,
+        draftId: expect.any(String),
+        text: "Bootstrap draft",
+        mode: "replace",
+        revision: 1,
+        updatedAt: expect.any(String),
+        metadata: {
+          source: "t3-task-orchestrator",
+          task_id: "task-1",
+          mode: "create_only",
+        },
+      },
+    });
+
+    const appendResponse = await requestPath(port, "/jh/thread-composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId,
+        threadId,
+        text: "\nAdd follow-up context",
+        mode: "append",
+      }),
+    });
+    expect(appendResponse.statusCode).toBe(200);
+    expect(JSON.parse(appendResponse.body)).toEqual({
+      ok: true,
+      draftId: expect.any(String),
+      revision: 2,
+    });
+
+    const stateAfterAppend = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(threadId!)}`,
+    );
+    expect(stateAfterAppend.statusCode).toBe(200);
+    expect(JSON.parse(stateAfterAppend.body)).toEqual({
+      threadId,
+      revision: 2,
+      entry: {
+        projectId,
+        threadId,
+        draftId: expect.any(String),
+        text: "Bootstrap draft\nAdd follow-up context",
+        mode: "append",
+        revision: 2,
+        updatedAt: expect.any(String),
+      },
+    });
+
+    const clearResponse = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(threadId!)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    expect(clearResponse.statusCode).toBe(200);
+    expect(JSON.parse(clearResponse.body)).toEqual({
+      ok: true,
+      revision: 3,
+    });
+
+    const clearPush = await waitForPush(
+      ws,
+      WS_CHANNELS.jhComposerPrefillUpdated,
+      (push) => push.data.threadId === threadId && push.data.cleared === true,
+    );
+    expect(clearPush.data).toEqual({
+      threadId,
+      draftId: null,
+      revision: 3,
+      cleared: true,
+      updatedAt: expect.any(String),
+    });
+
+    const stateAfterClear = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(threadId!)}`,
+    );
+    expect(stateAfterClear.statusCode).toBe(200);
+    expect(JSON.parse(stateAfterClear.body)).toEqual({
+      threadId,
+      revision: 3,
+      entry: null,
+    });
   });
 
   it("serves slash-prefixed windows local image paths through the proxy route", async () => {
