@@ -8,6 +8,7 @@ export interface JHRuntimeFeatureFlags {
   richImageRendering: boolean;
   streamlinedHeaderActions: boolean;
   mobileTerminalViewport: boolean;
+  mobileFullscreenViewport: boolean;
 }
 
 export interface JHRuntimeFeatureFlagsConfig {
@@ -22,6 +23,7 @@ export const DEFAULT_JH_RUNTIME_FEATURE_FLAGS: JHRuntimeFeatureFlags = {
   richImageRendering: true,
   streamlinedHeaderActions: true,
   mobileTerminalViewport: true,
+  mobileFullscreenViewport: true,
 };
 
 function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
@@ -34,7 +36,8 @@ function isRuntimeFeatureFlags(input: unknown): input is JHRuntimeFeatureFlags {
     typeof candidate.askUserWorkflow === "boolean" &&
     typeof candidate.richImageRendering === "boolean" &&
     typeof candidate.streamlinedHeaderActions === "boolean" &&
-    typeof candidate.mobileTerminalViewport === "boolean"
+    typeof candidate.mobileTerminalViewport === "boolean" &&
+    typeof candidate.mobileFullscreenViewport === "boolean"
   );
 }
 

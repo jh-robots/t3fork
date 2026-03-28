@@ -6,9 +6,9 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, Maximize2Icon, Minimize2Icon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -16,6 +16,7 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { OpenInPicker } from "./OpenInPicker";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { sortThreadsForSidebar } from "../Sidebar.logic";
 import { useHandleNewThread } from "~/hooks/useHandleNewThread";
 import { useAppSettings } from "~/appSettings";
@@ -27,6 +28,7 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeProjectId: ProjectId | undefined;
   activeProjectName: string | undefined;
+  mobileFullscreenViewportEnabled: boolean;
   streamlinedHeaderActions: boolean;
   isGitRepo: boolean;
   openInCwd: string | null;
@@ -53,6 +55,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeProjectId,
   activeProjectName,
+  mobileFullscreenViewportEnabled,
   streamlinedHeaderActions,
   isGitRepo,
   openInCwd,
@@ -79,7 +82,33 @@ export const ChatHeader = memo(function ChatHeader({
   const getDraftThreadByProjectId = useComposerDraftStore((store) => store.getDraftThreadByProjectId);
   const { settings: appSettings } = useAppSettings();
   const { handleNewThread } = useHandleNewThread();
+  const isTouchLayout = useMediaQuery({ pointer: "coarse" });
+  const [isFullscreen, setIsFullscreen] = useState(
+    () => typeof document !== "undefined" && document.fullscreenElement !== null,
+  );
   const shouldShowProjectSwitcher = projects.length > 1;
+  const fullscreenSupported =
+    typeof document !== "undefined" &&
+    typeof document.documentElement.requestFullscreen === "function" &&
+    typeof document.exitFullscreen === "function";
+  const showMobileFullscreenToggle =
+    mobileFullscreenViewportEnabled && isTouchLayout && fullscreenSupported;
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const syncFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement !== null);
+    };
+
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+    };
+  }, []);
 
   const handleProjectChange = (nextProjectId: string | null) => {
     if (!nextProjectId || nextProjectId === activeProjectId) {
@@ -97,7 +126,7 @@ export const ChatHeader = memo(function ChatHeader({
       threads.filter((thread) => thread.projectId === nextProjectId),
       appSettings.sidebarThreadSortOrder,
     )[0];
-    if (nextThread) {
+  if (nextThread) {
       void navigate({
         to: "/$threadId",
         params: { threadId: nextThread.id },
@@ -107,6 +136,19 @@ export const ChatHeader = memo(function ChatHeader({
     void handleNewThread(nextProjectId as ProjectId, {
       envMode: appSettings.defaultThreadEnvMode,
     });
+  };
+
+  const handleToggleFullscreen = (_pressed: boolean) => {
+    if (!showMobileFullscreenToggle || typeof document === "undefined") {
+      return;
+    }
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+
+    void document.documentElement.requestFullscreen().catch(() => {});
   };
 
   return (
@@ -188,6 +230,31 @@ export const ChatHeader = memo(function ChatHeader({
           >
             No Git
           </Badge>
+        )}
+        {showMobileFullscreenToggle && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={isFullscreen}
+                  onPressedChange={handleToggleFullscreen}
+                  aria-label={isFullscreen ? "Exit fullscreen mode" : "Enter fullscreen mode"}
+                  variant="outline"
+                  size="xs"
+                >
+                  {isFullscreen ? (
+                    <Minimize2Icon className="size-3" />
+                  ) : (
+                    <Maximize2Icon className="size-3" />
+                  )}
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {isFullscreen ? "Exit fullscreen mode" : "Enter fullscreen mode"}
+            </TooltipPopup>
+          </Tooltip>
         )}
         <Tooltip>
           <TooltipTrigger

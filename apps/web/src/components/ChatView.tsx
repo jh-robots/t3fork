@@ -89,6 +89,7 @@ import {
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -310,6 +311,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const jhRichImageRenderingEnabled = effectiveJhFeatureFlags.richImageRendering;
   const jhStreamlinedHeaderActionsEnabled = effectiveJhFeatureFlags.streamlinedHeaderActions;
   const jhMobileTerminalViewportEnabled = effectiveJhFeatureFlags.mobileTerminalViewport;
+  const jhMobileFullscreenViewportEnabled = effectiveJhFeatureFlags.mobileFullscreenViewport;
+  const isTouchLayout = useMediaQuery({ pointer: "coarse" });
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -377,6 +380,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const promptRef = useRef(prompt);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [mobileViewportOffsetTop, setMobileViewportOffsetTop] = useState(0);
+  const [mobileViewportBottomInset, setMobileViewportBottomInset] = useState(0);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -1896,6 +1901,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
       window.clearTimeout(timeout);
     };
   }, [activeThread?.id, scheduleStickToBottom]);
+  useEffect(() => {
+    if (
+      !jhMobileFullscreenViewportEnabled ||
+      !isTouchLayout ||
+      typeof window === "undefined" ||
+      window.visualViewport === undefined ||
+      window.visualViewport === null
+    ) {
+      setMobileViewportOffsetTop(0);
+      setMobileViewportBottomInset(0);
+      return;
+    }
+
+    const viewport = window.visualViewport;
+    const updateViewportInsets = () => {
+      setMobileViewportOffsetTop(Math.max(0, Math.round(viewport.offsetTop)));
+      setMobileViewportBottomInset(
+        Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)),
+      );
+    };
+
+    updateViewportInsets();
+    viewport.addEventListener("resize", updateViewportInsets);
+    viewport.addEventListener("scroll", updateViewportInsets);
+    return () => {
+      viewport.removeEventListener("resize", updateViewportInsets);
+      viewport.removeEventListener("scroll", updateViewportInsets);
+    };
+  }, [isTouchLayout, jhMobileFullscreenViewportEnabled]);
   useLayoutEffect(() => {
     const composerForm = composerFormRef.current;
     if (!composerForm) return;
@@ -3634,15 +3668,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border px-3 sm:px-5",
+          jhMobileFullscreenViewportEnabled
+            ? "sticky z-30 shrink-0 border-b border-border bg-background/95 px-3 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur sm:px-5"
+            : "border-b border-border px-3 sm:px-5",
           isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
+        style={
+          jhMobileFullscreenViewportEnabled && isTouchLayout
+            ? { top: `${mobileViewportOffsetTop}px` }
+            : undefined
+        }
       >
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
           activeProjectId={activeProject?.id}
           activeProjectName={activeProject?.name}
+          mobileFullscreenViewportEnabled={jhMobileFullscreenViewportEnabled}
           streamlinedHeaderActions={jhStreamlinedHeaderActionsEnabled}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
@@ -3739,7 +3781,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div
+            className={cn(
+              "px-3 pt-1.5 sm:px-5 sm:pt-2",
+              isGitRepo ? "pb-1" : "pb-3 sm:pb-4",
+              jhMobileFullscreenViewportEnabled &&
+                "shrink-0 bg-background/95 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur",
+            )}
+            style={
+              jhMobileFullscreenViewportEnabled && isTouchLayout
+                ? {
+                    marginBottom: `${mobileViewportBottomInset}px`,
+                    paddingBottom:
+                      mobileViewportBottomInset > 0
+                        ? "max(env(safe-area-inset-bottom), 0.75rem)"
+                        : undefined,
+                  }
+                : undefined
+            }
+          >
             <form
               ref={composerFormRef}
               onSubmit={onSend}

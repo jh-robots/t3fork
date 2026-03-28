@@ -286,6 +286,9 @@ function SettingsRouteView() {
     ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileTerminalViewport")
       ? ["JH mobile terminal viewport override"]
       : []),
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileFullscreenViewport")
+      ? ["JH mobile fullscreen viewport override"]
+      : []),
     ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
       ? ["Delete confirmation"]
@@ -414,7 +417,8 @@ function SettingsRouteView() {
       | "askUserWorkflow"
       | "richImageRendering"
       | "streamlinedHeaderActions"
-      | "mobileTerminalViewport",
+      | "mobileTerminalViewport"
+      | "mobileFullscreenViewport",
     enabled: boolean,
   ) {
     updateSettings({
@@ -433,7 +437,8 @@ function SettingsRouteView() {
       | "askUserWorkflow"
       | "richImageRendering"
       | "streamlinedHeaderActions"
-      | "mobileTerminalViewport",
+      | "mobileTerminalViewport"
+      | "mobileFullscreenViewport",
   ) {
     const nextOverrides = { ...settings.jhFeatureFlags };
     delete nextOverrides[key];
@@ -732,6 +737,35 @@ function SettingsRouteView() {
                       setJhFeatureFlagOverride("mobileTerminalViewport", Boolean(checked))
                     }
                     aria-label="Enable JH mobile terminal viewport handling"
+                  />
+                }
+              />
+
+              <SettingsRow
+                title="JH mobile fullscreen viewport"
+                description="Keep the chat header and composer anchored to the visible mobile viewport and expose a fullscreen toggle on supported touch browsers."
+                status={`Managed default: ${managedJhFeatureFlags.mobileFullscreenViewport ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileFullscreenViewport")
+                    ? effectiveJhFeatureFlags.mobileFullscreenViewport
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                }`}
+                resetAction={
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "mobileFullscreenViewport") ? (
+                    <SettingResetButton
+                      label="JH mobile fullscreen viewport override"
+                      onClick={() => clearJhFeatureFlagOverride("mobileFullscreenViewport")}
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={effectiveJhFeatureFlags.mobileFullscreenViewport}
+                    onCheckedChange={(checked) =>
+                      setJhFeatureFlagOverride("mobileFullscreenViewport", Boolean(checked))
+                    }
+                    aria-label="Enable JH mobile fullscreen viewport handling"
                   />
                 }
               />

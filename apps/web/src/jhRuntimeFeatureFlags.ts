@@ -6,6 +6,7 @@ export const JHFeatureFlagsSchema = Schema.Struct({
   richImageRendering: Schema.Boolean,
   streamlinedHeaderActions: Schema.Boolean,
   mobileTerminalViewport: Schema.Boolean,
+  mobileFullscreenViewport: Schema.Boolean,
 });
 export type JHFeatureFlags = typeof JHFeatureFlagsSchema.Type;
 export const DEFAULT_JH_FEATURE_FLAGS: JHFeatureFlags = {
@@ -13,12 +14,14 @@ export const DEFAULT_JH_FEATURE_FLAGS: JHFeatureFlags = {
   richImageRendering: true,
   streamlinedHeaderActions: true,
   mobileTerminalViewport: true,
+  mobileFullscreenViewport: true,
 };
 export type JHFeatureFlagOverrideMap = {
   askUserWorkflow?: boolean | undefined;
   richImageRendering?: boolean | undefined;
   streamlinedHeaderActions?: boolean | undefined;
   mobileTerminalViewport?: boolean | undefined;
+  mobileFullscreenViewport?: boolean | undefined;
 };
 
 export const JHRuntimeFeatureFlagsConfigSchema = Schema.Struct({
@@ -90,6 +93,9 @@ export function resolveEffectiveJhFeatureFlags(params: {
       params.overrides.streamlinedHeaderActions ?? params.managedDefaults.streamlinedHeaderActions,
     mobileTerminalViewport:
       params.overrides.mobileTerminalViewport ?? params.managedDefaults.mobileTerminalViewport,
+    mobileFullscreenViewport:
+      params.overrides.mobileFullscreenViewport ??
+      params.managedDefaults.mobileFullscreenViewport,
   };
 }
 

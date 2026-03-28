@@ -278,12 +278,14 @@ describe("JH feature flag overrides", () => {
           richImageRendering: false,
           streamlinedHeaderActions: true,
           mobileTerminalViewport: true,
+          mobileFullscreenViewport: true,
         },
         {
           askUserWorkflow: true,
           richImageRendering: true,
           streamlinedHeaderActions: true,
           mobileTerminalViewport: true,
+          mobileFullscreenViewport: true,
         },
       ),
     ).toEqual({
@@ -314,6 +316,14 @@ describe("JH feature flag overrides", () => {
           streamlinedHeaderActions: false,
         },
         "streamlinedHeaderActions",
+      ),
+    ).toBe(true);
+    expect(
+      isJhFeatureFlagOverridden(
+        {
+          mobileFullscreenViewport: false,
+        },
+        "mobileFullscreenViewport",
       ),
     ).toBe(true);
   });
