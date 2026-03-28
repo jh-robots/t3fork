@@ -327,6 +327,29 @@ function createDraftOnlySnapshot(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithSecondProject(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-second-project-target" as MessageId,
+    targetText: "second project target",
+  });
+  return {
+    ...snapshot,
+    projects: [
+      ...snapshot.projects,
+      {
+        id: "project-2" as ProjectId,
+        title: "Project Two",
+        workspaceRoot: "/repo/project-two",
+        defaultModel: "gpt-5",
+        scripts: [],
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        deletedAt: null,
+      },
+    ],
+  };
+}
+
 function withProjectScripts(
   snapshot: OrchestrationReadModel,
   scripts: OrchestrationReadModel["projects"][number]["scripts"],
@@ -1555,6 +1578,41 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("switches projects from the header even when the target project has no threads yet", async () => {
+    const mounted = await mountChatView({
+      viewport: { ...DEFAULT_VIEWPORT, width: 430, height: 932, name: "mobile-header-switch" },
+      snapshot: createSnapshotWithSecondProject(),
+    });
+
+    try {
+      const switchProjectButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[aria-label="Switch project"]'),
+        "Unable to find project switcher.",
+      );
+      switchProjectButton.click();
+
+      const projectTwoOption = page.getByText("Project Two");
+      await expect.element(projectTwoOption).toBeInTheDocument();
+      await projectTwoOption.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Project switcher should navigate to a draft thread for the selected project.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      expect(useComposerDraftStore.getState().getDraftThreadByProjectId("project-2" as ProjectId))
+        .toMatchObject({
+          threadId: newThreadId,
+          projectId: "project-2" as ProjectId,
+        });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("snapshots sticky codex settings into a new draft thread", async () => {
     useComposerDraftStore.setState({
       stickyModel: "gpt-5.3-codex",
@@ -1788,6 +1846,51 @@ describe("ChatView timeline estimator parity (full app)", () => {
         mounted.router,
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the shortcut.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("closes the mobile sidebar and focuses the composer after creating a new thread", async () => {
+    const mounted = await mountChatView({
+      viewport: { ...DEFAULT_VIEWPORT, width: 430, height: 932, name: "mobile-new-thread" },
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-new-thread-test" as MessageId,
+        targetText: "mobile new thread test",
+      }),
+    });
+
+    try {
+      const sidebarTrigger = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[data-slot="sidebar-trigger"]'),
+        "Unable to find sidebar trigger.",
+      );
+      sidebarTrigger.click();
+
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+      await newThreadButton.click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should change to a new draft thread on mobile.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-slot="sheet-popup"][data-sidebar="sidebar"]')).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const composerEditor = await waitForComposerEditor();
+      await vi.waitFor(
+        () => {
+          expect(document.activeElement === composerEditor || composerEditor.contains(document.activeElement)).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
       );
     } finally {
       await mounted.cleanup();
