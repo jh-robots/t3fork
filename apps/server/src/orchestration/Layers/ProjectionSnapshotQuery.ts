@@ -31,6 +31,7 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
+import { ProviderSessionRuntime } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
@@ -80,6 +81,12 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
+const ProviderSessionRuntimeDbRowSchema = ProviderSessionRuntime.mapFields(
+  Struct.assign({
+    resumeCursor: Schema.NullOr(Schema.fromJsonString(Schema.Unknown)),
+    runtimePayload: Schema.NullOr(Schema.fromJsonString(Schema.Unknown)),
+  }),
+);
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -127,6 +134,88 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
       : toPersistenceSqlError(sqlOperation)(cause);
+}
+
+function readRuntimePayloadValue(runtimePayload: unknown, key: string): string | null {
+  if (
+    runtimePayload === null ||
+    typeof runtimePayload !== "object" ||
+    Array.isArray(runtimePayload) ||
+    !(key in runtimePayload)
+  ) {
+    return null;
+  }
+  const value = (runtimePayload as Record<string, unknown>)[key];
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function reconcileProjectedSession(input: {
+  readonly projectedSession: OrchestrationSession | undefined;
+  readonly runtimeRow: Schema.Schema.Type<typeof ProviderSessionRuntimeDbRowSchema>;
+}): OrchestrationSession | undefined {
+  const { projectedSession, runtimeRow } = input;
+  const runtimeActiveTurnId = readRuntimePayloadValue(runtimeRow.runtimePayload, "activeTurnId");
+  if (runtimeRow.status !== "running" || runtimeActiveTurnId === null) {
+    return projectedSession;
+  }
+
+  if (
+    projectedSession?.status === "running" &&
+    projectedSession.activeTurnId === runtimeActiveTurnId &&
+    projectedSession.updatedAt >= runtimeRow.lastSeenAt
+  ) {
+    return projectedSession;
+  }
+
+  return {
+    threadId: runtimeRow.threadId,
+    status: "running",
+    providerName: runtimeRow.providerName,
+    runtimeMode: runtimeRow.runtimeMode,
+    activeTurnId: TurnId.makeUnsafe(runtimeActiveTurnId),
+    lastError:
+      readRuntimePayloadValue(runtimeRow.runtimePayload, "lastError") ??
+      projectedSession?.lastError ??
+      null,
+    updatedAt:
+      projectedSession && projectedSession.updatedAt > runtimeRow.lastSeenAt
+        ? projectedSession.updatedAt
+        : runtimeRow.lastSeenAt,
+  };
+}
+
+function reconcileLatestTurn(input: {
+  readonly latestTurn: OrchestrationLatestTurn | undefined;
+  readonly session: OrchestrationSession | undefined;
+}): OrchestrationLatestTurn | undefined {
+  const { latestTurn, session } = input;
+  if (session?.status !== "running" || session.activeTurnId === null) {
+    return latestTurn;
+  }
+  if (latestTurn?.turnId === session.activeTurnId && latestTurn.state === "running") {
+    return latestTurn;
+  }
+
+  return {
+    turnId: session.activeTurnId,
+    state: "running",
+    requestedAt:
+      latestTurn?.turnId === session.activeTurnId ? latestTurn.requestedAt : session.updatedAt,
+    startedAt:
+      latestTurn?.turnId === session.activeTurnId
+        ? (latestTurn.startedAt ?? session.updatedAt)
+        : session.updatedAt,
+    completedAt: null,
+    assistantMessageId:
+      latestTurn?.turnId === session.activeTurnId ? latestTurn.assistantMessageId : null,
+    ...(latestTurn?.turnId === session.activeTurnId && latestTurn.sourceProposedPlan
+      ? { sourceProposedPlan: latestTurn.sourceProposedPlan }
+      : {}),
+  };
 }
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
@@ -312,6 +401,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listProviderRuntimeRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProviderSessionRuntimeDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          provider_name AS "providerName",
+          adapter_key AS "adapterKey",
+          runtime_mode AS "runtimeMode",
+          status,
+          last_seen_at AS "lastSeenAt",
+          resume_cursor_json AS "resumeCursor",
+          runtime_payload_json AS "runtimePayload"
+        FROM provider_session_runtime
+        ORDER BY thread_id ASC
+      `,
+  });
+
   const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
     sql
       .withTransaction(
@@ -326,6 +434,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             checkpointRows,
             latestTurnRows,
             stateRows,
+            providerRuntimeRows,
           ] = yield* Effect.all([
             listProjectRows(undefined).pipe(
               Effect.mapError(
@@ -396,6 +505,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 toPersistenceSqlOrDecodeError(
                   "ProjectionSnapshotQuery.getSnapshot:listProjectionState:query",
                   "ProjectionSnapshotQuery.getSnapshot:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+            listProviderRuntimeRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSnapshot:listProviderRuntime:query",
+                  "ProjectionSnapshotQuery.getSnapshot:listProviderRuntime:decodeRows",
                 ),
               ),
             ),
@@ -531,6 +648,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
+          for (const row of providerRuntimeRows) {
+            updatedAt = maxIso(updatedAt, row.lastSeenAt);
+            const reconciledSession = reconcileProjectedSession({
+              projectedSession: sessionsByThread.get(row.threadId),
+              runtimeRow: row,
+            });
+            if (reconciledSession !== undefined) {
+              sessionsByThread.set(row.threadId, reconciledSession);
+            }
+          }
+
           const projects: Array<OrchestrationProject> = projectRows.map((row) => ({
             id: row.projectId,
             title: row.title,
@@ -542,25 +670,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             deletedAt: row.deletedAt,
           }));
 
-          const threads: Array<OrchestrationThread> = threadRows.map((row) => ({
-            id: row.threadId,
-            projectId: row.projectId,
-            title: row.title,
-            model: row.model,
-            runtimeMode: row.runtimeMode,
-            interactionMode: row.interactionMode,
-            branch: row.branch,
-            worktreePath: row.worktreePath,
-            latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-            messages: messagesByThread.get(row.threadId) ?? [],
-            proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-            activities: activitiesByThread.get(row.threadId) ?? [],
-            checkpoints: checkpointsByThread.get(row.threadId) ?? [],
-            session: sessionsByThread.get(row.threadId) ?? null,
-          }));
+          const threads: Array<OrchestrationThread> = threadRows.map((row) => {
+            const session = sessionsByThread.get(row.threadId);
+            const latestTurn = reconcileLatestTurn({
+              latestTurn: latestTurnByThread.get(row.threadId),
+              session,
+            });
+            return {
+              id: row.threadId,
+              projectId: row.projectId,
+              title: row.title,
+              model: row.model,
+              runtimeMode: row.runtimeMode,
+              interactionMode: row.interactionMode,
+              branch: row.branch,
+              worktreePath: row.worktreePath,
+              latestTurn: latestTurn ?? null,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              deletedAt: row.deletedAt,
+              messages: messagesByThread.get(row.threadId) ?? [],
+              proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+              activities: activitiesByThread.get(row.threadId) ?? [],
+              checkpoints: checkpointsByThread.get(row.threadId) ?? [],
+              session: session ?? null,
+            };
+          });
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),
