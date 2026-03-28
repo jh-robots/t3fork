@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { Option, Schema } from "effect";
 import {
   TrimmedNonEmptyString,
@@ -15,10 +15,11 @@ import {
   type JHFeatureFlagOverrideMap,
   type JHFeatureFlags,
 } from "./jhRuntimeFeatureFlags";
-import { useLocalStorage } from "./hooks/useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
+const APP_SETTINGS_MIGRATION_STATE_KEY = "t3code:app-settings:migrations:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 
@@ -27,7 +28,7 @@ export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
-export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
+export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "manual";
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
@@ -94,6 +95,13 @@ export const AppSettingsSchema = Schema.Struct({
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
 });
 export type AppSettings = typeof AppSettingsSchema.Type;
+const AppSettingsMigrationStateSchema = Schema.Struct({
+  legacySidebarProjectSortMigrated: Schema.Boolean,
+});
+type AppSettingsMigrationState = typeof AppSettingsMigrationStateSchema.Type;
+const DEFAULT_APP_SETTINGS_MIGRATION_STATE: AppSettingsMigrationState = {
+  legacySidebarProjectSortMigrated: false,
+};
 export interface AppModelOption {
   slug: string;
   name: string;
@@ -157,6 +165,17 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     ...settings,
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeAgent"),
+  };
+}
+
+export function migrateLegacySidebarProjectSortOrder(settings: AppSettings): AppSettings {
+  if (settings.sidebarProjectSortOrder !== "updated_at") {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    sidebarProjectSortOrder: "manual",
   };
 }
 
@@ -337,6 +356,32 @@ export function useAppSettings() {
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_APP_SETTINGS);
   }, [setSettings]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const migrationState =
+      getLocalStorageItem(APP_SETTINGS_MIGRATION_STATE_KEY, AppSettingsMigrationStateSchema) ??
+      DEFAULT_APP_SETTINGS_MIGRATION_STATE;
+    if (migrationState.legacySidebarProjectSortMigrated) {
+      return;
+    }
+
+    const migratedSettings = migrateLegacySidebarProjectSortOrder(settings);
+    if (migratedSettings !== settings) {
+      setSettings(migratedSettings);
+    }
+
+    setLocalStorageItem(
+      APP_SETTINGS_MIGRATION_STATE_KEY,
+      {
+        legacySidebarProjectSortMigrated: true,
+      },
+      AppSettingsMigrationStateSchema,
+    );
+  }, [setSettings, settings]);
 
   return {
     settings,

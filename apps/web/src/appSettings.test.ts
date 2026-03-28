@@ -13,6 +13,7 @@ import {
   getDefaultCustomModelsForProvider,
   getProviderStartOptions,
   isJhFeatureFlagOverridden,
+  migrateLegacySidebarProjectSortOrder,
   MODEL_PROVIDER_SETTINGS,
   normalizeCustomModelSlugs,
   patchCustomModels,
@@ -116,8 +117,8 @@ describe("timestamp format defaults", () => {
 });
 
 describe("sidebar sort defaults", () => {
-  it("defaults project sorting to updated_at", () => {
-    expect(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER).toBe("updated_at");
+  it("defaults project sorting to manual", () => {
+    expect(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER).toBe("manual");
   });
 
   it("defaults thread sorting to updated_at", () => {
@@ -266,6 +267,24 @@ describe("AppSettingsSchema", () => {
       customCodexModels: [],
       customClaudeModels: [],
     });
+  });
+});
+
+describe("migrateLegacySidebarProjectSortOrder", () => {
+  it("migrates the legacy project sort order to manual", () => {
+    const decode = Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema));
+    const settings = decode(JSON.stringify({ sidebarProjectSortOrder: "updated_at" }));
+
+    expect(migrateLegacySidebarProjectSortOrder(settings).sidebarProjectSortOrder).toBe("manual");
+  });
+
+  it("preserves explicit non-legacy project sort orders", () => {
+    const decode = Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema));
+    const settings = decode(JSON.stringify({ sidebarProjectSortOrder: "created_at" }));
+
+    expect(migrateLegacySidebarProjectSortOrder(settings).sidebarProjectSortOrder).toBe(
+      "created_at",
+    );
   });
 });
 
