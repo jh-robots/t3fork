@@ -39,6 +39,9 @@ beforeAll(() => {
     removeEventListener: () => {},
     desktopBridge: undefined,
     localStorage,
+    location: {
+      hostname: "127.0.0.1",
+    },
   });
   vi.stubGlobal("document", {
     documentElement: {
@@ -106,6 +109,56 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
+    expect(markup).toContain("font-sans");
+    expect(markup).not.toContain("font-mono text-sm leading-relaxed text-foreground");
+  });
+
+  it("renders plain user messages with sans typography", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.makeUnsafe("message-plain-user"),
+              role: "user",
+              text: "This should render in sans.",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        richImageRenderingEnabled
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("This should render in sans.");
+    expect(markup).toContain("font-sans");
+    expect(markup).not.toContain("<pre");
+    expect(markup).not.toContain("font-mono text-sm leading-relaxed text-foreground");
   });
 
   it("renders context compaction entries in the normal work log", async () => {
