@@ -78,6 +78,7 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { loadJhRuntimeFeatureFlags } from "./jhRuntimeFeatureFlags.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -158,6 +159,7 @@ function toPosixRelativePath(input: string): string {
 }
 
 const LOCAL_FILE_ROUTE_PATH = "/local-file";
+const JH_RUNTIME_CONFIG_ROUTE_PATH = "/jh-runtime-config";
 
 function normalizeRequestedLocalFilePath(input: string): string {
   if (/^\/[A-Za-z]:[\\/]/.test(input)) {
@@ -538,6 +540,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               "Cache-Control": "no-store",
             },
             data,
+          );
+          return;
+        }
+
+        if (url.pathname === JH_RUNTIME_CONFIG_ROUTE_PATH) {
+          const jhRuntimeConfig = yield* loadJhRuntimeFeatureFlags();
+          respond(
+            200,
+            {
+              "Content-Type": "application/json; charset=utf-8",
+              "Cache-Control": "no-store",
+              "Access-Control-Allow-Origin": "*",
+            },
+            JSON.stringify(jhRuntimeConfig),
           );
           return;
         }

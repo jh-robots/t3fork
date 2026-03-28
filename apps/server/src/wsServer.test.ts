@@ -1640,6 +1640,55 @@ describe("WebSocket Server", () => {
     expect(response.statusCode).toBe(200);
   });
 
+  it("serves JH runtime feature flags from the overlay manifest", async () => {
+    const overlayRoot = makeTempDir("t3code-jh-overlay-root-");
+    const manifestPath = path.join(overlayRoot, "customizations", "jh-feature-flags.json");
+    ensureParentDir(manifestPath);
+    fs.writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          version: 1,
+          updated_at: "2026-03-27",
+          flags: {
+            askUserWorkflow: false,
+            richImageRendering: true,
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const previousOverlayRoot = process.env.JH_CODE_OVERLAY_ROOT;
+    process.env.JH_CODE_OVERLAY_ROOT = overlayRoot;
+
+    try {
+      server = await createTestServer({ cwd: "/test" });
+      const addr = server.address();
+      const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+      const response = await requestPath(port, "/jh-runtime-config");
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual({
+        flags: {
+          askUserWorkflow: false,
+          richImageRendering: true,
+        },
+        source: "managed-manifest",
+        sourcePath: manifestPath,
+        updatedAt: "2026-03-27",
+      });
+    } finally {
+      if (previousOverlayRoot === undefined) {
+        delete process.env.JH_CODE_OVERLAY_ROOT;
+      } else {
+        process.env.JH_CODE_OVERLAY_ROOT = previousOverlayRoot;
+      }
+    }
+  });
+
   it("serves slash-prefixed windows local image paths through the proxy route", async () => {
     const imageDir = makeTempDir("t3code-ws-local-image-win-");
     const imagePath = path.join(imageDir, "inline-demo.png");

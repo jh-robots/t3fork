@@ -130,6 +130,11 @@ import {
   resolveAppModelSelection,
   useAppSettings,
 } from "../appSettings";
+import {
+  DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
+  jhRuntimeFeatureFlagsQueryOptions,
+  resolveEffectiveJhFeatureFlags,
+} from "../jhRuntimeFeatureFlags";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -290,8 +295,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const { settings } = useAppSettings();
   const setStickyComposerModel = useComposerDraftStore((store) => store.setStickyModel);
   const timestampFormat = settings.timestampFormat;
-  const jhAskUserWorkflowEnabled = settings.jhFeatureFlags.askUserWorkflow;
-  const jhRichImageRenderingEnabled = settings.jhFeatureFlags.richImageRendering;
+  const jhRuntimeFeatureFlagsQuery = useQuery(jhRuntimeFeatureFlagsQueryOptions());
+  const effectiveJhFeatureFlags = resolveEffectiveJhFeatureFlags({
+    managedDefaults:
+      jhRuntimeFeatureFlagsQuery.data?.flags ?? DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG.flags,
+    overrides: settings.jhFeatureFlags,
+  });
+  const jhAskUserWorkflowEnabled = effectiveJhFeatureFlags.askUserWorkflow;
+  const jhRichImageRenderingEnabled = effectiveJhFeatureFlags.richImageRendering;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -3587,6 +3598,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
+          activeProjectId={activeProject?.id}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}

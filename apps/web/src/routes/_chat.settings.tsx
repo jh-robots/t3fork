@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
 import { type ReactNode, useCallback, useState } from "react";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
@@ -7,9 +7,11 @@ import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   getAppModelOptions,
   getCustomModelsForProvider,
+  isJhFeatureFlagOverridden,
   MAX_CUSTOM_MODEL_LENGTH,
   MODEL_PROVIDER_SETTINGS,
   patchCustomModels,
+  resolveJhFeatureFlagOverrides,
   useAppSettings,
 } from "../appSettings";
 import { APP_VERSION } from "../branding";
@@ -30,6 +32,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
+import {
+  DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG,
+  jhRuntimeFeatureFlagQueryKeys,
+  jhRuntimeFeatureFlagsQueryOptions,
+  resolveEffectiveJhFeatureFlags,
+} from "../jhRuntimeFeatureFlags";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
@@ -188,7 +196,9 @@ function SettingResetButton({ label, onClick }: { label: string; onClick: () => 
 function SettingsRouteView() {
   const { theme, setTheme } = useTheme();
   const { settings, defaults, updateSettings, resetSettings } = useAppSettings();
+  const queryClient = useQueryClient();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const jhRuntimeFeatureFlagsQuery = useQuery(jhRuntimeFeatureFlagsQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
@@ -213,6 +223,14 @@ function SettingsRouteView() {
   const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const managedJhFeatureFlags =
+    jhRuntimeFeatureFlagsQuery.data?.flags ?? DEFAULT_JH_RUNTIME_FEATURE_FLAGS_CONFIG.flags;
+  const effectiveJhFeatureFlags = resolveEffectiveJhFeatureFlags({
+    managedDefaults: managedJhFeatureFlags,
+    overrides: settings.jhFeatureFlags,
+  });
+  const jhFeatureFlagSourcePath = jhRuntimeFeatureFlagsQuery.data?.sourcePath ?? "Unavailable";
+  const jhFeatureFlagSource = jhRuntimeFeatureFlagsQuery.data?.source ?? "overlay-root-missing";
 
   const gitTextGenerationModelOptions = getAppModelOptions(
     "codex",
@@ -256,11 +274,11 @@ function SettingsRouteView() {
     ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
       ? ["Assistant output"]
       : []),
-    ...(settings.jhFeatureFlags.askUserWorkflow !== defaults.jhFeatureFlags.askUserWorkflow
-      ? ["JH ask-user workflow"]
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "askUserWorkflow")
+      ? ["JH ask-user workflow override"]
       : []),
-    ...(settings.jhFeatureFlags.richImageRendering !== defaults.jhFeatureFlags.richImageRendering
-      ? ["JH rich image rendering"]
+    ...(isJhFeatureFlagOverridden(settings.jhFeatureFlags, "richImageRendering")
+      ? ["JH rich image rendering override"]
       : []),
     ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
@@ -383,6 +401,29 @@ function SettingsRouteView() {
       claudeAgent: "",
     });
     setCustomModelErrorByProvider({});
+  }
+
+  function setJhFeatureFlagOverride(
+    key: "askUserWorkflow" | "richImageRendering",
+    enabled: boolean,
+  ) {
+    updateSettings({
+      jhFeatureFlags: resolveJhFeatureFlagOverrides(
+        {
+          ...settings.jhFeatureFlags,
+          [key]: enabled,
+        },
+        managedJhFeatureFlags,
+      ),
+    });
+  }
+
+  function clearJhFeatureFlagOverride(key: "askUserWorkflow" | "richImageRendering") {
+    const nextOverrides = { ...settings.jhFeatureFlags };
+    delete nextOverrides[key];
+    updateSettings({
+      jhFeatureFlags: resolveJhFeatureFlagOverrides(nextOverrides, managedJhFeatureFlags),
+    });
   }
 
   return (
@@ -566,31 +607,26 @@ function SettingsRouteView() {
               <SettingsRow
                 title="JH ask-user workflow"
                 description="Toggle the richer JH ask-user UI, including multi-question navigation, custom-context handling, and answer history cards."
+                status={`Managed default: ${managedJhFeatureFlags.askUserWorkflow ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "askUserWorkflow")
+                    ? effectiveJhFeatureFlags.askUserWorkflow
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                }`}
                 resetAction={
-                  settings.jhFeatureFlags.askUserWorkflow !== defaults.jhFeatureFlags.askUserWorkflow ? (
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "askUserWorkflow") ? (
                     <SettingResetButton
-                      label="JH ask-user workflow"
-                      onClick={() =>
-                        updateSettings({
-                          jhFeatureFlags: {
-                            ...settings.jhFeatureFlags,
-                            askUserWorkflow: defaults.jhFeatureFlags.askUserWorkflow,
-                          },
-                        })
-                      }
+                      label="JH ask-user workflow override"
+                      onClick={() => clearJhFeatureFlagOverride("askUserWorkflow")}
                     />
                   ) : null
                 }
                 control={
                   <Switch
-                    checked={settings.jhFeatureFlags.askUserWorkflow}
+                    checked={effectiveJhFeatureFlags.askUserWorkflow}
                     onCheckedChange={(checked) =>
-                      updateSettings({
-                        jhFeatureFlags: {
-                          ...settings.jhFeatureFlags,
-                          askUserWorkflow: Boolean(checked),
-                        },
-                      })
+                      setJhFeatureFlagOverride("askUserWorkflow", Boolean(checked))
                     }
                     aria-label="Enable JH ask-user workflow"
                   />
@@ -600,34 +636,56 @@ function SettingsRouteView() {
               <SettingsRow
                 title="JH rich image rendering"
                 description="Toggle inline assistant image rendering, image-view rendering, and JH image interaction controls."
+                status={`Managed default: ${managedJhFeatureFlags.richImageRendering ? "On" : "Off"} • Local override: ${
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "richImageRendering")
+                    ? effectiveJhFeatureFlags.richImageRendering
+                      ? "On"
+                      : "Off"
+                    : "Inherit"
+                }`}
                 resetAction={
-                  settings.jhFeatureFlags.richImageRendering !== defaults.jhFeatureFlags.richImageRendering ? (
+                  isJhFeatureFlagOverridden(settings.jhFeatureFlags, "richImageRendering") ? (
                     <SettingResetButton
-                      label="JH rich image rendering"
-                      onClick={() =>
-                        updateSettings({
-                          jhFeatureFlags: {
-                            ...settings.jhFeatureFlags,
-                            richImageRendering: defaults.jhFeatureFlags.richImageRendering,
-                          },
-                        })
-                      }
+                      label="JH rich image rendering override"
+                      onClick={() => clearJhFeatureFlagOverride("richImageRendering")}
                     />
                   ) : null
                 }
                 control={
                   <Switch
-                    checked={settings.jhFeatureFlags.richImageRendering}
+                    checked={effectiveJhFeatureFlags.richImageRendering}
                     onCheckedChange={(checked) =>
-                      updateSettings({
-                        jhFeatureFlags: {
-                          ...settings.jhFeatureFlags,
-                          richImageRendering: Boolean(checked),
-                        },
-                      })
+                      setJhFeatureFlagOverride("richImageRendering", Boolean(checked))
                     }
                     aria-label="Enable JH rich image rendering"
                   />
+                }
+              />
+
+              <SettingsRow
+                title="JH managed defaults"
+                description="Repo-managed runtime defaults layered under the local JH feature switches."
+                status={
+                  <>
+                    <span className="block">Source: {jhFeatureFlagSource}</span>
+                    <span className="block break-all font-mono text-[11px] text-foreground">
+                      {jhFeatureFlagSourcePath}
+                    </span>
+                  </>
+                }
+                control={
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={jhRuntimeFeatureFlagsQuery.isFetching}
+                    onClick={() =>
+                      void queryClient.invalidateQueries({
+                        queryKey: jhRuntimeFeatureFlagQueryKeys.config(),
+                      })
+                    }
+                  >
+                    {jhRuntimeFeatureFlagsQuery.isFetching ? "Refreshing..." : "Refresh"}
+                  </Button>
                 }
               />
 

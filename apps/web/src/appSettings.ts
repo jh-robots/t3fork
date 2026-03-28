@@ -11,6 +11,10 @@ import {
   normalizeModelSlug,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
+import {
+  type JHFeatureFlagOverrideMap,
+  type JHFeatureFlags,
+} from "./jhRuntimeFeatureFlags";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
 
@@ -56,12 +60,12 @@ const withDefaults =
       Schema.withDecodingDefault(() => fallback()),
     );
 
-export const JHFeatureFlagsSchema = Schema.Struct({
-  askUserWorkflow: Schema.Boolean.pipe(withDefaults(() => true)),
-  richImageRendering: Schema.Boolean.pipe(withDefaults(() => true)),
+export const JHFeatureFlagOverridesSchema = Schema.Struct({
+  askUserWorkflow: Schema.optional(Schema.Boolean),
+  richImageRendering: Schema.optional(Schema.Boolean),
 });
-export type JHFeatureFlags = typeof JHFeatureFlagsSchema.Type;
-export const DEFAULT_JH_FEATURE_FLAGS = JHFeatureFlagsSchema.makeUnsafe({});
+export type JHFeatureFlagOverrides = typeof JHFeatureFlagOverridesSchema.Type;
+export const DEFAULT_JH_FEATURE_FLAG_OVERRIDES = JHFeatureFlagOverridesSchema.makeUnsafe({});
 
 export const AppSettingsSchema = Schema.Struct({
   claudeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
@@ -71,7 +75,9 @@ export const AppSettingsSchema = Schema.Struct({
   confirmThreadDelete: Schema.Boolean.pipe(withDefaults(() => true)),
   diffWordWrap: Schema.Boolean.pipe(withDefaults(() => false)),
   enableAssistantStreaming: Schema.Boolean.pipe(withDefaults(() => false)),
-  jhFeatureFlags: JHFeatureFlagsSchema.pipe(withDefaults(() => DEFAULT_JH_FEATURE_FLAGS)),
+  jhFeatureFlags: JHFeatureFlagOverridesSchema.pipe(
+    withDefaults(() => DEFAULT_JH_FEATURE_FLAG_OVERRIDES),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     withDefaults(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
@@ -148,6 +154,29 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeAgent"),
   };
+}
+
+export function resolveJhFeatureFlagOverrides(
+  overrides: JHFeatureFlagOverrideMap,
+  managedDefaults: JHFeatureFlags,
+): JHFeatureFlagOverrideMap {
+  return {
+    ...(overrides.askUserWorkflow === undefined ||
+    overrides.askUserWorkflow === managedDefaults.askUserWorkflow
+      ? {}
+      : { askUserWorkflow: overrides.askUserWorkflow }),
+    ...(overrides.richImageRendering === undefined ||
+    overrides.richImageRendering === managedDefaults.richImageRendering
+      ? {}
+      : { richImageRendering: overrides.richImageRendering }),
+  };
+}
+
+export function isJhFeatureFlagOverridden(
+  overrides: JHFeatureFlagOverrideMap,
+  key: keyof JHFeatureFlags,
+): boolean {
+  return typeof overrides[key] === "boolean";
 }
 
 export function getCustomModelsForProvider(

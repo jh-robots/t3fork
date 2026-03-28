@@ -12,9 +12,11 @@ import {
   getCustomModelsForProvider,
   getDefaultCustomModelsForProvider,
   getProviderStartOptions,
+  isJhFeatureFlagOverridden,
   MODEL_PROVIDER_SETTINGS,
   normalizeCustomModelSlugs,
   patchCustomModels,
+  resolveJhFeatureFlagOverrides,
   resolveAppModelSelection,
 } from "./appSettings";
 
@@ -257,11 +259,50 @@ describe("AppSettingsSchema", () => {
       defaultThreadEnvMode: "local",
       confirmThreadDelete: false,
       enableAssistantStreaming: false,
+      jhFeatureFlags: {},
       sidebarProjectSortOrder: DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
       sidebarThreadSortOrder: DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
       timestampFormat: DEFAULT_TIMESTAMP_FORMAT,
       customCodexModels: [],
       customClaudeModels: [],
     });
+  });
+});
+
+describe("JH feature flag overrides", () => {
+  it("drops overrides that match the managed defaults", () => {
+    expect(
+      resolveJhFeatureFlagOverrides(
+        {
+          askUserWorkflow: true,
+          richImageRendering: false,
+        },
+        {
+          askUserWorkflow: true,
+          richImageRendering: true,
+        },
+      ),
+    ).toEqual({
+      richImageRendering: false,
+    });
+  });
+
+  it("reports whether a feature flag is explicitly overridden", () => {
+    expect(
+      isJhFeatureFlagOverridden(
+        {
+          richImageRendering: false,
+        },
+        "askUserWorkflow",
+      ),
+    ).toBe(false);
+    expect(
+      isJhFeatureFlagOverridden(
+        {
+          richImageRendering: false,
+        },
+        "richImageRendering",
+      ),
+    ).toBe(true);
   });
 });
