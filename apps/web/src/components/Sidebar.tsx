@@ -1414,6 +1414,9 @@ export default function Sidebar() {
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    if (isMobile) {
+                      setOpenMobile(false);
+                    }
                     void handleNewThread(project.id, {
                       envMode: resolveSidebarNewThreadEnvMode({
                         defaultEnvMode: appSettings.defaultThreadEnvMode,
