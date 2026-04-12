@@ -63,13 +63,11 @@ interface JhComposerPrefillStoreDeps {
   path: Path.Path;
 }
 
-const loadPersistedJhComposerPrefillState = Effect.fn(function* (
-  deps: JhComposerPrefillStoreDeps,
-) {
+const loadPersistedJhComposerPrefillState = Effect.fn(function* (deps: JhComposerPrefillStoreDeps) {
   const filePath = prefillStatePath({ stateDir: deps.stateDir, path: deps.path });
-  const raw = yield* deps.fileSystem.readFileString(filePath).pipe(
-    Effect.catch(() => Effect.succeed(null)),
-  );
+  const raw = yield* deps.fileSystem
+    .readFileString(filePath)
+    .pipe(Effect.catch(() => Effect.succeed(null)));
   if (!raw) {
     return EMPTY_JH_COMPOSER_PREFILL_STATE;
   }

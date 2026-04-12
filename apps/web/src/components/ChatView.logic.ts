@@ -1,5 +1,5 @@
 import { ProjectId, type ThreadId } from "@t3tools/contracts";
-import { type ChatMessage, type Thread } from "../types";
+import { type ChatMessage, type SessionPhase, type Thread } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import { Schema } from "effect";
@@ -159,4 +159,27 @@ export function buildExpiredTerminalContextToastCopy(
     title: `${noun} omitted from message`,
     description: "Re-add it if you want that terminal output included.",
   };
+}
+
+export function shouldResetSendPhase(input: {
+  sendPhase: SendPhase;
+  phase: SessionPhase;
+  latestTurnSettled: boolean;
+  hasPendingApproval: boolean;
+  hasPendingUserInput: boolean;
+  hasThreadError: boolean;
+}): boolean {
+  if (input.sendPhase === "idle") {
+    return false;
+  }
+
+  if (input.hasPendingApproval || input.hasPendingUserInput || input.hasThreadError) {
+    return true;
+  }
+
+  if (input.phase === "running") {
+    return true;
+  }
+
+  return input.phase === "ready" && input.latestTurnSettled;
 }

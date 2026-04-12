@@ -181,7 +181,8 @@ export function projectEvent(
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
-            defaultModel: payload.defaultModel,
+            defaultModel: payload.defaultModel ?? null,
+            customIndicator: null,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -213,6 +214,9 @@ export function projectEvent(
                     : {}),
                   ...(payload.defaultModel !== undefined
                     ? { defaultModel: payload.defaultModel }
+                    : {}),
+                  ...(payload.customIndicator !== undefined
+                    ? { customIndicator: payload.customIndicator }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
@@ -257,6 +261,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            customIndicator: null,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -294,10 +299,14 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.projectId !== undefined ? { projectId: payload.projectId } : {}),
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.customIndicator !== undefined
+              ? { customIndicator: payload.customIndicator }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

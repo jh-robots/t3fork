@@ -5,8 +5,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { ServerConfig } from "./config";
+import { JhLoopRuntimeServiceLive } from "./loops/Layers/JhLoopRuntime";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
+import { JhLoopRuntimeRepositoryLive } from "./persistence/Layers/JhLoopRuntime";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
@@ -122,6 +124,10 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
   );
+  const jhLoopRuntimeLayer = JhLoopRuntimeServiceLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+    Layer.provideMerge(JhLoopRuntimeRepositoryLive),
+  );
 
   const terminalLayer = TerminalManagerLive.pipe(Layer.provide(makeRuntimePtyAdapterLayer()));
 
@@ -133,6 +139,7 @@ export function makeServerRuntimeServicesLayer() {
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
+    jhLoopRuntimeLayer,
     GitCoreLive,
     gitManagerLayer,
     terminalLayer,

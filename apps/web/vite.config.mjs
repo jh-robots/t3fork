@@ -29,6 +29,7 @@ const buildSourcemap =
       : true;
 
 export default defineConfig({
+  oxc: false,
   plugins: [
     tanstackRouter(),
     react(),

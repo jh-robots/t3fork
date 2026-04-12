@@ -47,14 +47,12 @@ const TOAST_ICONS = {
 } as const;
 
 const TOAST_ACCENT_STYLES = {
-  amber:
-    "border-amber-500/35 bg-amber-500/12 text-amber-700 ring-amber-500/25 dark:text-amber-200",
+  amber: "border-amber-500/35 bg-amber-500/12 text-amber-700 ring-amber-500/25 dark:text-amber-200",
   blue: "border-sky-500/35 bg-sky-500/12 text-sky-700 ring-sky-500/25 dark:text-sky-200",
   green:
     "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200",
   red: "border-rose-500/35 bg-rose-500/12 text-rose-700 ring-rose-500/25 dark:text-rose-200",
-  slate:
-    "border-slate-500/30 bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200",
+  slate: "border-slate-500/30 bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-200",
   teal: "border-teal-500/35 bg-teal-500/12 text-teal-700 ring-teal-500/25 dark:text-teal-200",
 } as const;
 

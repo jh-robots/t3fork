@@ -1,5 +1,7 @@
 import type {
+  JhLoopBinding as ContractJhLoopBinding,
   OrchestrationLatestTurn,
+  OrchestrationCustomIndicator,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
@@ -84,7 +86,72 @@ export interface Project {
   expanded: boolean;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
+  customIndicator?: OrchestrationCustomIndicator | null;
   scripts: ProjectScript[];
+}
+
+export type SidebarTreeNodeId = string;
+export type SidebarNodeAccent =
+  | "slate"
+  | "blue"
+  | "green"
+  | "amber"
+  | "rose"
+  | "violet"
+  | "cyan"
+  | "neutral";
+
+export interface SidebarTreeContainerMetadata {
+  runtimeProjectId?: ProjectId | null;
+  workspaceOverride?: string | null;
+  icon?: string | null;
+  accent?: SidebarNodeAccent | null;
+  loopBinding?: ContractJhLoopBinding | null;
+}
+
+export interface SidebarTreeBaseNode {
+  id: SidebarTreeNodeId;
+  parentId: SidebarTreeNodeId | null;
+  expanded: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SidebarFolderNode extends SidebarTreeBaseNode {
+  kind: "folder";
+  title: string;
+  childrenIds: SidebarTreeNodeId[];
+  runtimeProjectId?: ProjectId | null;
+  workspaceOverride?: string | null;
+  icon?: string | null;
+  accent?: SidebarNodeAccent | null;
+  loopBinding?: ContractJhLoopBinding | null;
+}
+
+export interface SidebarVirtualProjectNode extends SidebarTreeBaseNode {
+  kind: "virtualProject";
+  title: string;
+  childrenIds: SidebarTreeNodeId[];
+  runtimeProjectId?: ProjectId | null;
+  workspaceOverride?: string | null;
+  icon?: string | null;
+  accent?: SidebarNodeAccent | null;
+  loopBinding?: ContractJhLoopBinding | null;
+}
+
+export interface SidebarRuntimeProjectNode extends SidebarTreeBaseNode {
+  kind: "runtimeProject";
+  projectId: ProjectId;
+}
+
+export type SidebarTreeNode =
+  | SidebarFolderNode
+  | SidebarVirtualProjectNode
+  | SidebarRuntimeProjectNode;
+
+export interface SidebarTreeState {
+  rootIds: SidebarTreeNodeId[];
+  nodesById: Record<SidebarTreeNodeId, SidebarTreeNode>;
 }
 
 export interface Thread {
@@ -105,6 +172,8 @@ export interface Thread {
   lastVisitedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  customIndicator?: OrchestrationCustomIndicator | null;
+  isDraft?: boolean | undefined;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }

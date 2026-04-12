@@ -304,17 +304,17 @@ function ChatMarkdown({
       img({ node: _node, src, alt, ...props }) {
         const imageName = alt?.trim() || "Assistant image";
         if (!src) {
-          return (
-            <span className="text-sm text-muted-foreground/70">
-              {imageName}
-            </span>
-          );
+          return <span className="text-sm text-muted-foreground/70">{imageName}</span>;
         }
 
         const resolvedSrc = resolveInlineImageSrc(src);
 
         if (!richImageRenderingEnabled) {
-          return <a href={resolvedSrc} target="_blank" rel="noreferrer">{imageName}</a>;
+          return (
+            <a href={resolvedSrc} target="_blank" rel="noreferrer">
+              {imageName}
+            </a>
+          );
         }
 
         return (

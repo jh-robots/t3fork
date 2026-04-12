@@ -29,9 +29,10 @@ export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "manual";
-export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
+export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
+export const DEFAULT_WORKSPACE_ROOT = "C:\\Users\\johnh\\git\\obsidian";
 type CustomModelSettingsKey = "customCodexModels" | "customClaudeModels";
 export type ProviderCustomModelConfig = {
   provider: ProviderKind;
@@ -76,6 +77,9 @@ export const AppSettingsSchema = Schema.Struct({
   claudeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
+  defaultWorkspaceRoot: Schema.String.check(Schema.isMaxLength(4096)).pipe(
+    withDefaults(() => DEFAULT_WORKSPACE_ROOT),
+  ),
   defaultThreadEnvMode: EnvMode.pipe(withDefaults(() => "local" as const satisfies EnvMode)),
   confirmThreadDelete: Schema.Boolean.pipe(withDefaults(() => true)),
   diffWordWrap: Schema.Boolean.pipe(withDefaults(() => false)),

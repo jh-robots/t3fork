@@ -4,6 +4,7 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationCustomIndicator,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   ProjectScript,
@@ -46,6 +47,7 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
+    customIndicator: Schema.NullOr(Schema.fromJsonString(OrchestrationCustomIndicator)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -56,7 +58,11 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread;
+const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    customIndicator: Schema.NullOr(Schema.fromJsonString(OrchestrationCustomIndicator)),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -163,6 +169,10 @@ function reconcileProjectedSession(input: {
     return projectedSession;
   }
 
+  if (projectedSession && projectedSession.updatedAt >= runtimeRow.lastSeenAt) {
+    return projectedSession;
+  }
+
   if (
     projectedSession?.status === "running" &&
     projectedSession.activeTurnId === runtimeActiveTurnId &&
@@ -231,6 +241,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model AS "defaultModel",
+          custom_indicator_json AS "customIndicator",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -254,6 +265,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          custom_indicator_json AS "customIndicator",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -664,6 +676,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             title: row.title,
             workspaceRoot: row.workspaceRoot,
             defaultModel: row.defaultModel,
+            customIndicator: row.customIndicator,
             scripts: row.scripts,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
@@ -685,6 +698,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               interactionMode: row.interactionMode,
               branch: row.branch,
               worktreePath: row.worktreePath,
+              customIndicator: row.customIndicator,
               latestTurn: latestTurn ?? null,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,

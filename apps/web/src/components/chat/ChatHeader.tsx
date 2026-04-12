@@ -79,7 +79,9 @@ export const ChatHeader = memo(function ChatHeader({
   const navigate = useNavigate();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
-  const getDraftThreadByProjectId = useComposerDraftStore((store) => store.getDraftThreadByProjectId);
+  const getDraftThreadByProjectId = useComposerDraftStore(
+    (store) => store.getDraftThreadByProjectId,
+  );
   const { settings: appSettings } = useAppSettings();
   const { handleNewThread } = useHandleNewThread();
   const isTouchLayout = useMediaQuery({ pointer: "coarse" });
@@ -126,7 +128,7 @@ export const ChatHeader = memo(function ChatHeader({
       threads.filter((thread) => thread.projectId === nextProjectId),
       appSettings.sidebarThreadSortOrder,
     )[0];
-  if (nextThread) {
+    if (nextThread) {
       void navigate({
         to: "/$threadId",
         params: { threadId: nextThread.id },

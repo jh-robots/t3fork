@@ -1,5 +1,5 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
-import { ProviderModelOptions } from "./model";
+import { DEFAULT_MODEL, ProviderModelOptions } from "./model";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -140,11 +140,56 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+const SidebarIndicatorLabel = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
+const SidebarIndicatorCssValue = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+export const SidebarIndicatorTone = Schema.Union([
+  Schema.Literals([
+    "slate",
+    "gray",
+    "zinc",
+    "neutral",
+    "stone",
+    "red",
+    "orange",
+    "amber",
+    "yellow",
+    "lime",
+    "green",
+    "emerald",
+    "teal",
+    "cyan",
+    "sky",
+    "blue",
+    "indigo",
+    "violet",
+    "purple",
+    "fuchsia",
+    "pink",
+    "rose",
+  ]),
+  TrimmedNonEmptyString,
+]);
+export type SidebarIndicatorTone = typeof SidebarIndicatorTone.Type;
+
+export const OrchestrationCustomIndicator = Schema.Struct({
+  label: SidebarIndicatorLabel,
+  tone: Schema.optional(SidebarIndicatorTone),
+  textColor: Schema.optional(SidebarIndicatorCssValue),
+  dotColor: Schema.optional(SidebarIndicatorCssValue),
+  bgColor: Schema.optional(SidebarIndicatorCssValue),
+  pulse: Schema.optional(Schema.Boolean),
+  priority: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationCustomIndicator = typeof OrchestrationCustomIndicator.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -280,6 +325,9 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -310,13 +358,14 @@ export const ProjectCreateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ProjectMetaUpdateCommand = Schema.Struct({
+export const ProjectMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("project.meta.update"),
   commandId: CommandId,
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModel: Schema.optional(TrimmedNonEmptyString),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });
 
@@ -348,14 +397,16 @@ const ThreadDeleteCommand = Schema.Struct({
   threadId: ThreadId,
 });
 
-const ThreadMetaUpdateCommand = Schema.Struct({
+export const ThreadMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.meta.update"),
   commandId: CommandId,
   threadId: ThreadId,
+  projectId: Schema.optional(ProjectId),
   title: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -610,7 +661,9 @@ export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
-  defaultModel: Schema.NullOr(TrimmedNonEmptyString),
+  defaultModel: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -621,6 +674,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModel: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });
@@ -634,7 +688,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
-  model: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(() => DEFAULT_MODEL)),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
@@ -652,10 +706,12 @@ export const ThreadDeletedPayload = Schema.Struct({
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
+  projectId: Schema.optional(ProjectId),
   title: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  customIndicator: Schema.optional(Schema.NullOr(OrchestrationCustomIndicator)),
   updatedAt: IsoDateTime,
 });
 
