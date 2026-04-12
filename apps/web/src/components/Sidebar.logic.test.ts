@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createSidebarBadgeUpdateCommand,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
+  resolveDraftThreadTitle,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -76,6 +78,16 @@ describe("shouldClearThreadSelectionOnMouseDown", () => {
   });
 });
 
+describe("resolveDraftThreadTitle", () => {
+  it("falls back to New thread when the draft is empty", () => {
+    expect(resolveDraftThreadTitle("   ")).toBe("New thread");
+  });
+
+  it("uses the first non-empty draft line as the sidebar title", () => {
+    expect(resolveDraftThreadTitle("First line\nSecond line")).toBe("First line");
+  });
+});
+
 describe("resolveSidebarNewThreadEnvMode", () => {
   it("uses the app default when the caller does not request a specific mode", () => {
     expect(
@@ -97,6 +109,7 @@ describe("resolveSidebarNewThreadEnvMode", () => {
 
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
+    customIndicator: null,
     interactionMode: "plan" as const,
     latestTurn: null,
     lastVisitedAt: undefined,
@@ -109,6 +122,24 @@ describe("resolveThreadStatusPill", () => {
       orchestrationStatus: "running" as const,
     },
   };
+
+  it("prefers a custom indicator over derived runtime status", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          customIndicator: {
+            label: "Thinking",
+            tone: "violet",
+            pulse: true,
+            priority: 42,
+          },
+        },
+        hasPendingApprovals: true,
+        hasPendingUserInput: true,
+      }),
+    ).toMatchObject({ label: "Thinking", pulse: true, priority: 42 });
+  });
 
   it("shows pending approval before all other statuses", () => {
     expect(
@@ -138,6 +169,24 @@ describe("resolveThreadStatusPill", () => {
         hasPendingUserInput: false,
       }),
     ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows problem when the thread session is in error", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "error",
+            lastError: "Provider session failed",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Problem", pulse: false, dotClass: "bg-rose-500 dark:bg-rose-300/90" });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -215,7 +264,7 @@ describe("resolveThreadStatusPill", () => {
         hasPendingApprovals: false,
         hasPendingUserInput: false,
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toMatchObject({ label: "Completed", pulse: false, dotClass: "bg-green-500 dark:bg-green-300/90" });
   });
 });
 
@@ -244,52 +293,101 @@ describe("resolveThreadRowClassName", () => {
 });
 
 describe("resolveProjectStatusIndicator", () => {
-  it("returns null when no threads have a notable status", () => {
-    expect(resolveProjectStatusIndicator([null, null])).toBeNull();
+  it("returns null when no leader thread is set", () => {
+    expect(
+      resolveProjectStatusIndicator({
+        leaderThreadStatus: null,
+      }),
+    ).toBeNull();
   });
 
-  it("surfaces the highest-priority actionable state across project threads", () => {
+  it("returns the designated leader thread status", () => {
     expect(
-      resolveProjectStatusIndicator([
-        {
-          label: "Completed",
-          colorClass: "text-emerald-600",
-          dotClass: "bg-emerald-500",
-          pulse: false,
-        },
-        {
+      resolveProjectStatusIndicator({
+        leaderThreadStatus: {
           label: "Pending Approval",
           colorClass: "text-amber-600",
           dotClass: "bg-amber-500",
           pulse: false,
+          priority: 5,
         },
-        {
+      }),
+    ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
+  });
+
+  it("prefers a loop problem over a stale supervisor working state", () => {
+    expect(
+      resolveProjectStatusIndicator({
+        loopIndicator: {
+          label: "Problem",
+          tone: "rose",
+          pulse: false,
+          priority: 5,
+        },
+        supervisorThreadStatus: {
           label: "Working",
           colorClass: "text-sky-600",
           dotClass: "bg-sky-500",
           pulse: true,
+          priority: 3,
         },
-      ]),
-    ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
+        leaderThreadStatus: null,
+      }),
+    ).toMatchObject({ label: "Problem", dotClass: "bg-rose-500 dark:bg-rose-300/90" });
   });
 
-  it("prefers plan-ready over completed when no stronger action is needed", () => {
+  it("normalizes completed supervisor labels to green Complete", () => {
     expect(
-      resolveProjectStatusIndicator([
-        {
-          label: "Completed",
+      resolveProjectStatusIndicator({
+        loopIndicator: {
+          label: "Starting",
+          tone: "cyan",
+          pulse: true,
+          priority: 2,
+        },
+        supervisorThreadStatus: {
+          label: "Goal Achieved",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
+          priority: 1,
         },
-        {
-          label: "Plan Ready",
-          colorClass: "text-violet-600",
-          dotClass: "bg-violet-500",
-          pulse: false,
+        leaderThreadStatus: null,
+      }),
+    ).toMatchObject({ label: "Complete", dotClass: "bg-green-500 dark:bg-green-300/90" });
+  });
+});
+
+describe("createSidebarBadgeUpdateCommand", () => {
+  it("creates a thread meta update command for set badge", () => {
+    expect(
+      createSidebarBadgeUpdateCommand({
+        commandId: "cmd-thread-badge" as never,
+        target: { kind: "thread", id: ThreadId.makeUnsafe("thread-1") },
+        customIndicator: {
+          label: "Working",
+          tone: "sky",
         },
-      ]),
-    ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+      }),
+    ).toMatchObject({
+      type: "thread.meta.update",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      customIndicator: { label: "Working", tone: "sky" },
+    });
+  });
+
+  it("creates a project meta update command for clear badge", () => {
+    expect(
+      createSidebarBadgeUpdateCommand({
+        commandId: "cmd-project-badge" as never,
+        target: { kind: "project", id: ProjectId.makeUnsafe("project-1") },
+        customIndicator: null,
+      }),
+    ).toMatchObject({
+      type: "project.meta.update",
+      projectId: ProjectId.makeUnsafe("project-1"),
+      customIndicator: null,
+    });
   });
 });
 
@@ -351,6 +449,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     expanded: true,
     createdAt: "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
+    customIndicator: null,
     scripts: [],
     ...overrides,
   };
@@ -374,6 +473,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    customIndicator: null,
     turnDiffSummaries: [],
     activities: [],
     ...overrides,
@@ -503,6 +603,21 @@ describe("sortThreadsForSidebar", () => {
     expect(sorted.map((thread) => thread.id)).toEqual([
       ThreadId.makeUnsafe("thread-1"),
       ThreadId.makeUnsafe("thread-2"),
+    ]);
+  });
+
+  it("preserves manual thread ordering", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        makeThread({ id: ThreadId.makeUnsafe("thread-2") }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-1") }),
+      ],
+      "manual",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-2"),
+      ThreadId.makeUnsafe("thread-1"),
     ]);
   });
 });

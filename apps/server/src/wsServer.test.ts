@@ -402,7 +402,7 @@ async function requestPath(
   port: number,
   requestPath: string,
   options?: {
-    method?: "GET" | "POST" | "DELETE";
+    method?: "GET" | "POST" | "PATCH" | "DELETE" | "OPTIONS";
     body?: string;
     headers?: Record<string, string>;
   },
@@ -1857,6 +1857,887 @@ describe("WebSocket Server", () => {
       threadId,
       revision: 3,
       entry: null,
+    });
+  });
+
+  it("spawns a project with multiple threads over the JH spawn route", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-spawn-project-");
+    const response = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          workspaceRoot,
+          title: "Spawn Project",
+        },
+        threads: [
+          {
+            title: "Inbox Zero",
+          },
+          {
+            title: "Sponsor Follow-Ups",
+            model: "gpt-5.4-mini",
+            runtimeMode: "approval-required",
+            interactionMode: "plan",
+          },
+        ],
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      ok: boolean;
+      project: {
+        projectId: string;
+        title: string;
+        workspaceRoot: string;
+        created: boolean;
+        sidebarExpanded: boolean;
+      };
+      threads: Array<{ threadId: string; title: string; created: boolean; firstTurnSent: boolean }>;
+    };
+    expect(body).toEqual({
+      ok: true,
+      project: {
+        projectId: expect.any(String),
+        title: "Spawn Project",
+        workspaceRoot,
+        created: true,
+        sidebarExpanded: true,
+      },
+      threads: [
+        {
+          threadId: expect.any(String),
+          title: "Inbox Zero",
+          created: true,
+          firstTurnSent: false,
+        },
+        {
+          threadId: expect.any(String),
+          title: "Sponsor Follow-Ups",
+          created: true,
+          firstTurnSent: false,
+        },
+      ],
+    });
+
+    const sidebarPush = await waitForPush(ws, WS_CHANNELS.jhSidebarProjectVisibilityUpdated);
+    expect(sidebarPush.data).toEqual({
+      projectId: body.project.projectId,
+      workspaceRoot,
+      expanded: true,
+    });
+
+    const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+    expect(snapshotResponse.error).toBeUndefined();
+    const snapshot = snapshotResponse.result as {
+      projects: Array<{ id: string; title: string; workspaceRoot: string; deletedAt: string | null }>;
+      threads: Array<{
+        id: string;
+        projectId: string;
+        title: string;
+        model: string;
+        runtimeMode: string;
+        interactionMode: string;
+        deletedAt: string | null;
+      }>;
+    };
+
+    expect(
+      snapshot.projects.find(
+        (project) =>
+          project.id === body.project.projectId &&
+          project.workspaceRoot === workspaceRoot &&
+          project.deletedAt === null,
+      ),
+    ).toBeTruthy();
+    expect(
+      snapshot.threads.find(
+        (thread) =>
+          thread.id === body.threads[0]!.threadId &&
+          thread.projectId === body.project.projectId &&
+          thread.title === "Inbox Zero" &&
+          thread.model === "gpt-5.4" &&
+          thread.runtimeMode === "full-access" &&
+          thread.interactionMode === "default" &&
+          thread.deletedAt === null,
+      ),
+    ).toBeTruthy();
+    expect(
+      snapshot.threads.find(
+        (thread) =>
+          thread.id === body.threads[1]!.threadId &&
+          thread.projectId === body.project.projectId &&
+          thread.title === "Sponsor Follow-Ups" &&
+          thread.model === "gpt-5.4-mini" &&
+          thread.runtimeMode === "approval-required" &&
+          thread.interactionMode === "plan" &&
+          thread.deletedAt === null,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("creates a managed loop over /jh/loops and preserves the sidebar contract", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-loop-create-");
+    const startedAt = Date.now();
+    const response = await requestPath(port, "/jh/loops", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        loopType: "goal-loop",
+        project: {
+          workspaceRoot,
+          title: "Loop Contract Project",
+        },
+        objective: "Validate the in-app loop runtime.",
+        completionCriteria: "Stop only when the loop has created the expected threads.",
+        workerCount: 2,
+        workerModel: "gpt-5.4",
+        supervisorModel: "gpt-5.4",
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    const body = JSON.parse(response.body) as {
+      ok: boolean;
+      binding: {
+        jobKey: string;
+        loopType: string;
+        runtimeProjectId: string;
+        supervisorThreadId: string | null;
+        workerThreadIds: string[];
+        lastKnownStatus?: {
+          enabled: boolean;
+          requestedState: string | null;
+          completed: boolean;
+          phase: string;
+        } | null;
+      };
+      status: {
+        jobKey: string;
+        loopType: string;
+        enabled: boolean;
+        requestedState: string | null;
+        completed: boolean;
+        phase: string;
+        projectId?: string;
+        projectTitle: string | null;
+        supervisorThreadId: string | null;
+        workerThreadIds: string[];
+      };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.binding.jobKey).toMatch(/^Loop Contract Project Goal Loop/);
+    expect(body.binding.loopType).toBe("goal-loop");
+    expect(body.binding.runtimeProjectId).toEqual(body.status.projectId);
+    expect(body.binding.supervisorThreadId).toEqual(body.status.supervisorThreadId);
+    expect(body.binding.workerThreadIds).toHaveLength(0);
+    expect(body.status.jobKey).toBe(body.binding.jobKey);
+    expect(body.status.loopType).toBe("goal-loop");
+    expect(body.status.enabled).toBe(true);
+    expect(body.status.requestedState).toBe("running");
+    expect(body.status.completed).toBe(false);
+    expect(body.status.projectTitle).toBe("Loop Contract Project");
+    expect(body.status.phase).toBe("queued");
+
+    let snapshot:
+      | {
+          projects: Array<{ id: string; title: string; workspaceRoot: string; deletedAt: string | null }>;
+          threads: Array<{
+            id: string;
+            projectId: string;
+            title: string;
+            messages: Array<{ role: string; text: string }>;
+            deletedAt: string | null;
+          }>;
+        }
+      | undefined;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+      expect(snapshotResponse.error).toBeUndefined();
+      snapshot = snapshotResponse.result as typeof snapshot;
+      const liveThreads =
+        snapshot?.threads.filter(
+          (thread) => thread.projectId === body.binding.runtimeProjectId && thread.deletedAt === null,
+        ) ?? [];
+      const workerThread = liveThreads.find(
+        (thread) => !thread.title.toLowerCase().includes("supervisor"),
+      );
+      if (liveThreads.length >= 3 && workerThread?.messages.some((message) => message.role === "user")) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    expect(
+      snapshot?.projects.find(
+        (project) =>
+          project.id === body.binding.runtimeProjectId &&
+          project.title === "Loop Contract Project" &&
+          project.workspaceRoot === workspaceRoot &&
+          project.deletedAt === null,
+      ),
+    ).toBeTruthy();
+    expect(
+      snapshot?.threads.filter(
+        (thread) => thread.projectId === body.binding.runtimeProjectId && thread.deletedAt === null,
+      ),
+    ).toHaveLength(3);
+    expect(
+      snapshot?.threads
+        .find(
+          (thread) =>
+            thread.projectId === body.binding.runtimeProjectId &&
+            thread.deletedAt === null &&
+            !thread.title.toLowerCase().includes("supervisor"),
+        )
+        ?.messages.some((message) => message.role === "user"),
+    ).toBe(true);
+  });
+
+  it("supports /jh/loops status and control operations without changing the contract", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-loop-control-");
+    const createResponse = await requestPath(port, "/jh/loops", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        loopType: "goal-loop",
+        project: {
+          workspaceRoot,
+          title: "Loop Control Project",
+        },
+        objective: "Exercise loop controls.",
+        workerCount: 1,
+        workerModel: "gpt-5.4",
+        supervisorModel: "gpt-5.4",
+      }),
+    });
+
+    expect(createResponse.statusCode).toBe(200);
+    const createBody = JSON.parse(createResponse.body) as {
+      binding: { jobKey: string; runtimeProjectId: string; workerThreadIds: string[] };
+      status: { jobKey: string; loopType: string };
+    };
+
+    const statusResponse = await requestPath(
+      port,
+      `/jh/loops?job_key=${encodeURIComponent(createBody.binding.jobKey)}`,
+    );
+    expect(statusResponse.statusCode).toBe(200);
+    expect(JSON.parse(statusResponse.body)).toMatchObject({
+      jobKey: createBody.binding.jobKey,
+      loopType: "goal-loop",
+      projectId: createBody.binding.runtimeProjectId,
+      workerThreadIds: [],
+    });
+
+    const pauseResponse = await requestPath(port, "/jh/loops", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jobKey: createBody.binding.jobKey,
+        action: "pause",
+      }),
+    });
+    expect(pauseResponse.statusCode).toBe(200);
+    expect(JSON.parse(pauseResponse.body)).toMatchObject({
+      ok: true,
+      binding: {
+        jobKey: createBody.binding.jobKey,
+        runtimeProjectId: createBody.binding.runtimeProjectId,
+      },
+      status: {
+        jobKey: createBody.binding.jobKey,
+        enabled: false,
+        requestedState: "paused",
+      },
+    });
+
+    const resumeResponse = await requestPath(port, "/jh/loops", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jobKey: createBody.binding.jobKey,
+        action: "resume",
+      }),
+    });
+    expect(resumeResponse.statusCode).toBe(200);
+    expect(JSON.parse(resumeResponse.body)).toMatchObject({
+      ok: true,
+      status: {
+        jobKey: createBody.binding.jobKey,
+        enabled: true,
+        requestedState: "running",
+      },
+    });
+
+    const updateTypeResponse = await requestPath(port, "/jh/loops", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jobKey: createBody.binding.jobKey,
+        action: "update-type",
+        loopType: "endless-loop",
+      }),
+    });
+    expect(updateTypeResponse.statusCode).toBe(200);
+    expect(JSON.parse(updateTypeResponse.body)).toMatchObject({
+      ok: true,
+      binding: {
+        jobKey: createBody.binding.jobKey,
+        loopType: "endless-loop",
+      },
+      status: {
+        jobKey: createBody.binding.jobKey,
+        loopType: "endless-loop",
+      },
+    });
+  });
+
+  it("spawns threads with draft prefills over the JH spawn route", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-spawn-drafts-");
+    const response = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          workspaceRoot,
+          title: "Draft Project",
+        },
+        threads: [
+          {
+            title: "Draft One",
+            draft: {
+              text: "Bootstrap the first draft",
+              metadata: {
+                source: "jh-spawn-test",
+                task_id: "draft-1",
+              },
+            },
+          },
+          {
+            title: "Draft Two",
+            draft: {
+              text: "Append me later",
+              mode: "append",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      project: { projectId: string; sidebarExpanded: boolean };
+      threads: Array<{
+        threadId: string;
+        title: string;
+        created: boolean;
+        draftRevision?: number;
+        firstTurnSent: boolean;
+      }>;
+    };
+    expect(body.threads).toEqual([
+      {
+        threadId: expect.any(String),
+        title: "Draft One",
+        created: true,
+        draftRevision: 1,
+        firstTurnSent: false,
+      },
+      {
+        threadId: expect.any(String),
+        title: "Draft Two",
+        created: true,
+        draftRevision: 1,
+        firstTurnSent: false,
+      },
+    ]);
+    expect(body.project.sidebarExpanded).toBe(true);
+
+    const firstDraftState = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(body.threads[0]!.threadId)}`,
+    );
+    expect(firstDraftState.statusCode).toBe(200);
+    expect(JSON.parse(firstDraftState.body)).toEqual({
+      threadId: body.threads[0]!.threadId,
+      revision: 1,
+      entry: {
+        projectId: body.project.projectId,
+        threadId: body.threads[0]!.threadId,
+        draftId: expect.any(String),
+        text: "Bootstrap the first draft",
+        mode: "replace",
+        revision: 1,
+        updatedAt: expect.any(String),
+        metadata: {
+          source: "jh-spawn-test",
+          task_id: "draft-1",
+        },
+      },
+    });
+
+    const secondDraftState = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(body.threads[1]!.threadId)}`,
+    );
+    expect(secondDraftState.statusCode).toBe(200);
+    expect(JSON.parse(secondDraftState.body)).toEqual({
+      threadId: body.threads[1]!.threadId,
+      revision: 1,
+      entry: {
+        projectId: body.project.projectId,
+        threadId: body.threads[1]!.threadId,
+        draftId: expect.any(String),
+        text: "Append me later",
+        mode: "append",
+        revision: 1,
+        updatedAt: expect.any(String),
+      },
+    });
+
+    const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+    expect(snapshotResponse.error).toBeUndefined();
+    const snapshot = snapshotResponse.result as { threads: Array<{ id: string; title: string }> };
+    expect(snapshot.threads.find((thread) => thread.id === body.threads[0]!.threadId)?.title).toBe(
+      "Draft One",
+    );
+    expect(snapshot.threads.find((thread) => thread.id === body.threads[1]!.threadId)?.title).toBe(
+      "Draft Two",
+    );
+  });
+
+  it("spawns a thread and immediately sends the first turn over the JH spawn route", async () => {
+    const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
+    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const providerService: ProviderServiceShape = {
+      startSession: (threadId) =>
+        Effect.succeed({
+          provider: "codex",
+          status: "ready",
+          runtimeMode: "full-access",
+          threadId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      sendTurn: ({ threadId }) =>
+        Effect.succeed({
+          threadId,
+          turnId: asTurnId("provider-turn-jh-spawn"),
+        }),
+      interruptTurn: () => unsupported(),
+      respondToRequest: () => unsupported(),
+      respondToUserInput: () => unsupported(),
+      stopSession: () => unsupported(),
+      listSessions: () => Effect.succeed([]),
+      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      rollbackConversation: () => unsupported(),
+      streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+    };
+    const providerLayer = Layer.succeed(ProviderService, providerService);
+
+    server = await createTestServer({
+      cwd: "/test",
+      providerLayer,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-spawn-send-");
+    const response = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          workspaceRoot,
+          title: "Immediate Send Project",
+        },
+        threads: [
+          {
+            title: "Kickoff Thread",
+            firstTurn: {
+              text: "Kick off the analysis.",
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      project: { projectId: string; sidebarExpanded: boolean };
+      threads: Array<{ threadId: string; title: string; created: boolean; firstTurnSent: boolean }>;
+    };
+    expect(body.threads).toEqual([
+      {
+        threadId: expect.any(String),
+        title: "Kickoff Thread",
+        created: true,
+        firstTurnSent: true,
+      },
+    ]);
+    expect(body.project.sidebarExpanded).toBe(true);
+
+    let thread:
+      | {
+          id: string;
+          projectId: string;
+          latestTurn: null | { turnId: string; state: string };
+          messages: Array<{ role: string; text: string }>;
+        }
+      | undefined;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+      expect(snapshotResponse.error).toBeUndefined();
+      const snapshot = snapshotResponse.result as {
+        threads: Array<{
+          id: string;
+          projectId: string;
+          latestTurn: null | { turnId: string; state: string };
+          messages: Array<{ role: string; text: string }>;
+        }>;
+      };
+      thread = snapshot.threads.find((item) => item.id === body.threads[0]!.threadId);
+      if (thread?.messages.some((message) => message.text === "Kick off the analysis.")) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(thread?.projectId).toBe(body.project.projectId);
+    expect(thread?.messages.map((message) => [message.role, message.text])).toContainEqual([
+      "user",
+      "Kick off the analysis.",
+    ]);
+  });
+
+  it("reuses an existing project and supports mixed draft and immediate-send spawn bundles", async () => {
+    const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
+    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const providerService: ProviderServiceShape = {
+      startSession: (threadId) =>
+        Effect.succeed({
+          provider: "codex",
+          status: "ready",
+          runtimeMode: "full-access",
+          threadId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      sendTurn: ({ threadId }) =>
+        Effect.succeed({
+          threadId,
+          turnId: asTurnId("provider-turn-jh-spawn-mixed"),
+        }),
+      interruptTurn: () => unsupported(),
+      respondToRequest: () => unsupported(),
+      respondToUserInput: () => unsupported(),
+      stopSession: () => unsupported(),
+      listSessions: () => Effect.succeed([]),
+      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      rollbackConversation: () => unsupported(),
+      streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+    };
+    const providerLayer = Layer.succeed(ProviderService, providerService);
+
+    server = await createTestServer({
+      cwd: "/test",
+      providerLayer,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-spawn-reuse-");
+    const firstResponse = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          workspaceRoot,
+          title: "Reuse Project",
+        },
+        threads: [
+          {
+            title: "Existing Draft Thread",
+            draft: {
+              text: "Existing draft",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(firstResponse.statusCode).toBe(200);
+    const firstBody = JSON.parse(firstResponse.body) as {
+      project: { projectId: string };
+    };
+
+    const secondResponse = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          projectId: firstBody.project.projectId,
+          workspaceRoot,
+          title: "Ignored Rename Attempt",
+        },
+        threads: [
+          {
+            title: "Fresh Draft Thread",
+            draft: {
+              text: "Second draft payload",
+            },
+          },
+          {
+            title: "Fresh Immediate Thread",
+            firstTurn: {
+              text: "Send this right away.",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(secondResponse.statusCode).toBe(200);
+    const secondBody = JSON.parse(secondResponse.body) as {
+      project: {
+        projectId: string;
+        title: string;
+        workspaceRoot: string;
+        created: boolean;
+        sidebarExpanded: boolean;
+      };
+      threads: Array<{
+        threadId: string;
+        title: string;
+        created: boolean;
+        draftRevision?: number;
+        firstTurnSent: boolean;
+      }>;
+    };
+    expect(secondBody.project).toEqual({
+      projectId: firstBody.project.projectId,
+      title: "Reuse Project",
+      workspaceRoot,
+      created: false,
+      sidebarExpanded: true,
+    });
+    expect(secondBody.threads).toEqual([
+      {
+        threadId: expect.any(String),
+        title: "Fresh Draft Thread",
+        created: true,
+        draftRevision: 1,
+        firstTurnSent: false,
+      },
+      {
+        threadId: expect.any(String),
+        title: "Fresh Immediate Thread",
+        created: true,
+        firstTurnSent: true,
+      },
+    ]);
+
+    const draftState = await requestPath(
+      port,
+      `/jh/thread-composer?thread_id=${encodeURIComponent(secondBody.threads[0]!.threadId)}`,
+    );
+    expect(draftState.statusCode).toBe(200);
+    expect(JSON.parse(draftState.body)).toEqual({
+      threadId: secondBody.threads[0]!.threadId,
+      revision: 1,
+      entry: {
+        projectId: firstBody.project.projectId,
+        threadId: secondBody.threads[0]!.threadId,
+        draftId: expect.any(String),
+        text: "Second draft payload",
+        mode: "replace",
+        revision: 1,
+        updatedAt: expect.any(String),
+      },
+    });
+
+    let snapshot:
+      | {
+          projects: Array<{ id: string; workspaceRoot: string; deletedAt: string | null }>;
+          threads: Array<{
+            id: string;
+            projectId: string;
+            title: string;
+            messages: Array<{ role: string; text: string }>;
+          }>;
+        }
+      | undefined;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+      expect(snapshotResponse.error).toBeUndefined();
+      snapshot = snapshotResponse.result as {
+        projects: Array<{ id: string; workspaceRoot: string; deletedAt: string | null }>;
+        threads: Array<{
+          id: string;
+          projectId: string;
+          title: string;
+          messages: Array<{ role: string; text: string }>;
+        }>;
+      };
+      if (
+        snapshot.threads
+          .find((thread) => thread.id === secondBody.threads[1]!.threadId)
+          ?.messages.some((message) => message.text === "Send this right away.")
+      ) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(
+      snapshot?.projects.filter(
+        (project) =>
+          project.workspaceRoot === workspaceRoot &&
+          project.id === firstBody.project.projectId &&
+          project.deletedAt === null,
+      ),
+    ).toHaveLength(1);
+    expect(
+      snapshot?.threads
+        .find((thread) => thread.id === secondBody.threads[1]!.threadId)
+        ?.messages.map(
+        (message) => [message.role, message.text],
+      ),
+    ).toContainEqual(["user", "Send this right away."]);
+  });
+
+  it("allows spawn requests to collapse the project in the sidebar", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-jh-spawn-collapsed-");
+    const response = await requestPath(port, "/jh/spawn", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        project: {
+          workspaceRoot,
+          title: "Collapsed Spawn Project",
+          sidebarExpanded: false,
+        },
+        threads: [{ title: "Collapsed Draft" }],
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as {
+      project: { projectId: string; workspaceRoot: string; sidebarExpanded: boolean };
+    };
+    expect(body.project.sidebarExpanded).toBe(false);
+
+    const push = await waitForPush(ws, WS_CHANNELS.jhSidebarProjectVisibilityUpdated);
+    expect(push.data).toEqual({
+      projectId: body.project.projectId,
+      workspaceRoot,
+      expanded: false,
+    });
+  });
+
+  it("updates an existing project's sidebar visibility over the management route", async () => {
+    server = await createTestServer({
+      cwd: "/test/sidebar-project",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await requestPath(port, "/jh/sidebar/projects", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId: welcome.data.bootstrapProjectId,
+        expanded: false,
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      projectId: welcome.data.bootstrapProjectId,
+      workspaceRoot: "/test/sidebar-project",
+      expanded: false,
+    });
+
+    const push = await waitForPush(ws, WS_CHANNELS.jhSidebarProjectVisibilityUpdated);
+    expect(push.data).toEqual({
+      projectId: welcome.data.bootstrapProjectId,
+      workspaceRoot: "/test/sidebar-project",
+      expanded: false,
     });
   });
 
