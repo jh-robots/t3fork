@@ -2,6 +2,7 @@ import {
   type GitActionProgressEvent,
   type JhComposerPrefillUpdatedPayload,
   type JhNotificationTriggeredPayload,
+  type JhSidebarProjectVisibilityUpdatedPayload,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
   type ContextMenuItem,
@@ -21,6 +22,9 @@ const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayloa
 const gitActionProgressListeners = new Set<(payload: GitActionProgressEvent) => void>();
 const jhComposerPrefillUpdatedListeners = new Set<
   (payload: JhComposerPrefillUpdatedPayload) => void
+>();
+const jhSidebarProjectVisibilityUpdatedListeners = new Set<
+  (payload: JhSidebarProjectVisibilityUpdatedPayload) => void
 >();
 const jhNotificationTriggeredListeners = new Set<
   (payload: JhNotificationTriggeredPayload) => void
@@ -102,6 +106,26 @@ export function onJhNotificationTriggered(
   };
 }
 
+export function onJhSidebarProjectVisibilityUpdated(
+  listener: (payload: JhSidebarProjectVisibilityUpdatedPayload) => void,
+): () => void {
+  jhSidebarProjectVisibilityUpdatedListeners.add(listener);
+
+  const latestUpdate =
+    instance?.transport.getLatestPush(WS_CHANNELS.jhSidebarProjectVisibilityUpdated)?.data ?? null;
+  if (latestUpdate) {
+    try {
+      listener(latestUpdate);
+    } catch {
+      // Swallow listener errors
+    }
+  }
+
+  return () => {
+    jhSidebarProjectVisibilityUpdatedListeners.delete(listener);
+  };
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) return instance.api;
 
@@ -140,6 +164,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_CHANNELS.jhComposerPrefillUpdated, (message) => {
     const payload = message.data;
     for (const listener of jhComposerPrefillUpdatedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(WS_CHANNELS.jhSidebarProjectVisibilityUpdated, (message) => {
+    const payload = message.data;
+    for (const listener of jhSidebarProjectVisibilityUpdatedListeners) {
       try {
         listener(payload);
       } catch {
@@ -264,5 +298,6 @@ export function resetWsNativeApiForTests(): void {
   serverConfigUpdatedListeners.clear();
   gitActionProgressListeners.clear();
   jhComposerPrefillUpdatedListeners.clear();
+  jhSidebarProjectVisibilityUpdatedListeners.clear();
   jhNotificationTriggeredListeners.clear();
 }
