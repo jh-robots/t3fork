@@ -918,6 +918,12 @@ export function deriveTimelineEntries(
   workEntries: WorkLogEntry[],
   userInputEntries: UserInputHistoryEntry[],
 ): TimelineEntry[] {
+  const kindOrder: Record<TimelineEntry["kind"], number> = {
+    message: 0,
+    "proposed-plan": 1,
+    work: 2,
+    "user-input": 3,
+  };
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
     kind: "message",
@@ -942,9 +948,17 @@ export function deriveTimelineEntries(
     createdAt: userInput.createdAt,
     userInput,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows, ...userInputRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...userInputRows].toSorted((a, b) => {
+    const byCreatedAt = a.createdAt.localeCompare(b.createdAt);
+    if (byCreatedAt !== 0) {
+      return byCreatedAt;
+    }
+    const byKind = kindOrder[a.kind] - kindOrder[b.kind];
+    if (byKind !== 0) {
+      return byKind;
+    }
+    return a.id.localeCompare(b.id);
+  });
 }
 
 export function inferCheckpointTurnCountByTurnId(

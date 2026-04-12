@@ -12,12 +12,18 @@ import type { Duplex } from "node:stream";
 import Mime from "@effect/platform-node/Mime";
 import {
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ClientOrchestrationCommand,
   type JhComposerPrefillRequest,
   JhComposerPrefillRequest as JhComposerPrefillRequestSchema,
   type JhNotificationTriggerRequest,
   JhNotificationTriggerRequest as JhNotificationTriggerRequestSchema,
+  type JhSidebarProjectVisibilityRequest,
+  JhSidebarProjectVisibilityRequest as JhSidebarProjectVisibilityRequestSchema,
+  type JhSpawnRequest,
+  JhSpawnRequest as JhSpawnRequestSchema,
+  MessageId,
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
@@ -38,6 +44,7 @@ import {
   Exit,
   FileSystem,
   Layer,
+  Option,
   Path,
   Ref,
   Result,
@@ -51,6 +58,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
+import { tryHandleJhLoopRoute } from "./jhLoopRoute.ts";
+import { JhLoopRuntimeService } from "./loops/Services/JhLoopRuntime.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { searchWorkspaceEntries } from "./workspaceEntries";
@@ -170,6 +179,8 @@ function toPosixRelativePath(input: string): string {
 const LOCAL_FILE_ROUTE_PATH = "/local-file";
 const JH_RUNTIME_CONFIG_ROUTE_PATH = "/jh-runtime-config";
 const JH_THREAD_COMPOSER_ROUTE_PATH = "/jh/thread-composer";
+const JH_SIDEBAR_PROJECT_ROUTE_PATH = "/jh/sidebar/projects";
+const JH_SPAWN_ROUTE_PATH = "/jh/spawn";
 const JH_NOTIFY_ROUTE_PATH = "/jh/notify";
 
 function readHttpRequestBody(request: http.IncomingMessage): Promise<string> {
@@ -223,6 +234,22 @@ function decodeJhComposerPrefillRequest(raw: string): JhComposerPrefillRequest |
 function decodeJhNotificationTriggerRequest(raw: string): JhNotificationTriggerRequest | null {
   try {
     return Schema.decodeUnknownSync(JhNotificationTriggerRequestSchema)(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function decodeJhSpawnRequest(raw: string): JhSpawnRequest | null {
+  try {
+    return Schema.decodeUnknownSync(JhSpawnRequestSchema)(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function decodeJhSidebarProjectVisibilityRequest(raw: string): JhSidebarProjectVisibilityRequest | null {
+  try {
+    return Schema.decodeUnknownSync(JhSidebarProjectVisibilityRequestSchema)(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -285,6 +312,7 @@ export type ServerCoreRuntimeServices =
   | ProjectionSnapshotQuery
   | CheckpointDiffQuery
   | OrchestrationReactor
+  | JhLoopRuntimeService
   | ProviderService
   | ProviderHealth;
 
@@ -374,27 +402,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
   yield* readiness.markKeybindingsReady;
 
+  const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
+    const normalizedWorkspaceRoot = path.resolve(
+      yield* expandHomePath(workspaceRoot.trim()).pipe(Effect.provideService(Path.Path, path)),
+    );
+    const workspaceStat = yield* fileSystem
+      .stat(normalizedWorkspaceRoot)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!workspaceStat) {
+      return yield* new RouteRequestError({
+        message: `Project directory does not exist: ${normalizedWorkspaceRoot}`,
+      });
+    }
+    if (workspaceStat.type !== "Directory") {
+      return yield* new RouteRequestError({
+        message: `Project path is not a directory: ${normalizedWorkspaceRoot}`,
+      });
+    }
+    return normalizedWorkspaceRoot;
+  });
+
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
   }) {
-    const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
-      const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
-      const workspaceStat = yield* fileSystem
-        .stat(normalizedWorkspaceRoot)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
-      if (!workspaceStat) {
-        return yield* new RouteRequestError({
-          message: `Project directory does not exist: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      if (workspaceStat.type !== "Directory") {
-        return yield* new RouteRequestError({
-          message: `Project path is not a directory: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      return normalizedWorkspaceRoot;
-    });
-
     if (input.command.type === "project.create") {
       return {
         ...input.command,
@@ -486,6 +516,286 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         attachments: normalizedAttachments,
       },
     } satisfies OrchestrationCommand;
+  });
+
+  const findActiveProject = Effect.fnUntraced(function* (input: {
+    readonly projectId?: ProjectId;
+    readonly workspaceRoot?: string;
+  }) {
+    if (input.projectId === undefined && input.workspaceRoot === undefined) {
+      return null;
+    }
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    return (
+      snapshot.projects.find(
+        (project) =>
+          project.deletedAt === null &&
+          (input.projectId === undefined || project.id === input.projectId) &&
+          (input.workspaceRoot === undefined || project.workspaceRoot === input.workspaceRoot),
+      ) ?? null
+    );
+  });
+
+  const findActiveThread = Effect.fnUntraced(function* (input: {
+    readonly threadId: string;
+    readonly projectId?: ProjectId;
+  }) {
+    if (input.threadId.length === 0) {
+      return null;
+    }
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    return (
+      snapshot.threads.find(
+        (thread) =>
+          thread.id === input.threadId &&
+          thread.deletedAt === null &&
+          (input.projectId === undefined || thread.projectId === input.projectId),
+      ) ?? null
+    );
+  });
+
+  const stageJhComposerPrefill = Effect.fnUntraced(function* (
+    prefill: JhComposerPrefillRequest,
+  ) {
+    const entry = yield* upsertJhComposerDraftState({
+      stateDir: serverConfig.stateDir,
+      fileSystem,
+      path,
+      prefill,
+    });
+    yield* pushBus.publishAll(WS_CHANNELS.jhComposerPrefillUpdated, {
+      threadId: entry.threadId,
+      projectId: entry.projectId,
+      draftId: entry.draftId,
+      revision: entry.revision,
+      cleared: false,
+      updatedAt: entry.updatedAt,
+    });
+    return entry;
+  });
+
+  const publishJhSidebarProjectVisibility = Effect.fnUntraced(function* (input: {
+    readonly projectId: ProjectId;
+    readonly workspaceRoot: string;
+    readonly expanded: boolean;
+  }) {
+    yield* pushBus.publishAll(WS_CHANNELS.jhSidebarProjectVisibilityUpdated, {
+      projectId: input.projectId,
+      workspaceRoot: input.workspaceRoot,
+      expanded: input.expanded,
+    });
+    return {
+      ok: true,
+      projectId: input.projectId,
+      workspaceRoot: input.workspaceRoot,
+      expanded: input.expanded,
+    };
+  });
+
+  const dispatchClientCommand = Effect.fnUntraced(function* (
+    command: ClientOrchestrationCommand,
+  ) {
+    const normalizedCommand = yield* normalizeDispatchCommand({ command });
+    return yield* orchestrationEngine.dispatch(normalizedCommand);
+  });
+
+  const performJhSpawn = Effect.fnUntraced(function* (request: JhSpawnRequest) {
+    if (request.threads.length === 0) {
+      return yield* new RouteRequestError({
+        message: "Spawn request must include at least one thread.",
+      });
+    }
+
+    const normalizedWorkspaceRoot =
+      request.project.workspaceRoot !== undefined
+        ? yield* normalizeProjectWorkspaceRoot(request.project.workspaceRoot)
+        : undefined;
+
+    const existingProjectById =
+      request.project.projectId !== undefined
+        ? yield* findActiveProject({ projectId: request.project.projectId })
+        : null;
+    const existingProjectByWorkspace =
+      normalizedWorkspaceRoot !== undefined
+        ? yield* findActiveProject({ workspaceRoot: normalizedWorkspaceRoot })
+        : null;
+
+    if (
+      existingProjectById &&
+      normalizedWorkspaceRoot !== undefined &&
+      existingProjectById.workspaceRoot !== normalizedWorkspaceRoot
+    ) {
+      return yield* new RouteRequestError({
+        message: "Supplied projectId does not match the supplied workspaceRoot.",
+      });
+    }
+
+    if (
+      request.project.projectId !== undefined &&
+      !existingProjectById &&
+      existingProjectByWorkspace &&
+      existingProjectByWorkspace.id !== request.project.projectId
+    ) {
+      return yield* new RouteRequestError({
+        message: "Supplied projectId does not match the existing project for workspaceRoot.",
+      });
+    }
+
+    if (
+      existingProjectById &&
+      existingProjectByWorkspace &&
+      existingProjectById.id !== existingProjectByWorkspace.id
+    ) {
+      return yield* new RouteRequestError({
+        message: "Supplied projectId and workspaceRoot resolve to different active projects.",
+      });
+    }
+
+    let resolvedProject = existingProjectById ?? existingProjectByWorkspace;
+    let projectCreated = false;
+
+    if (!resolvedProject) {
+      if (normalizedWorkspaceRoot === undefined) {
+        return yield* new RouteRequestError({
+          message: "Spawn request must include workspaceRoot when creating a project.",
+        });
+      }
+      const projectId = request.project.projectId ?? ProjectId.makeUnsafe(crypto.randomUUID());
+      const projectTitle =
+        request.project.title ?? path.basename(normalizedWorkspaceRoot) ?? "project";
+      const createdAt = new Date().toISOString();
+      yield* dispatchClientCommand({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+        projectId,
+        title: projectTitle,
+        workspaceRoot: normalizedWorkspaceRoot,
+        defaultModel: request.project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+        createdAt,
+      });
+      resolvedProject = {
+        id: projectId,
+        title: projectTitle,
+        workspaceRoot: normalizedWorkspaceRoot,
+        defaultModel: request.project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+        customIndicator: null,
+        scripts: [],
+        createdAt,
+        updatedAt: createdAt,
+        deletedAt: null,
+      };
+      projectCreated = true;
+    }
+    if (!resolvedProject) {
+      return yield* new RouteRequestError({
+        message: "Failed to resolve project for spawn request.",
+      });
+    }
+    const activeProject = resolvedProject;
+
+    const defaultThreadModel =
+      request.project.defaultModel ??
+      activeProject.defaultModel ??
+      DEFAULT_MODEL_BY_PROVIDER.codex;
+    const sidebarExpanded = request.project.sidebarExpanded ?? true;
+
+    const threadResults = yield* Effect.forEach(
+      request.threads,
+      (threadSpec) =>
+        Effect.gen(function* () {
+          if (threadSpec.draft && threadSpec.firstTurn) {
+            return yield* new RouteRequestError({
+              message: `Thread '${threadSpec.title}' cannot request both draft and firstTurn in one spawn call.`,
+            });
+          }
+
+          const threadId = threadSpec.threadId ?? ThreadId.makeUnsafe(crypto.randomUUID());
+          const threadModel = threadSpec.model ?? defaultThreadModel;
+          const createdAt = new Date().toISOString();
+
+          yield* dispatchClientCommand({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+            projectId: activeProject.id,
+            title: threadSpec.title,
+            model: threadModel,
+            runtimeMode: threadSpec.runtimeMode ?? "full-access",
+            interactionMode: threadSpec.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+            branch: threadSpec.branch ?? null,
+            worktreePath: threadSpec.worktreePath ?? null,
+            createdAt,
+          });
+
+          let draftRevision: number | undefined;
+          if (threadSpec.draft) {
+            const entry = yield* stageJhComposerPrefill({
+              projectId: activeProject.id,
+              threadId,
+              text: threadSpec.draft.text,
+              ...(threadSpec.draft.mode !== undefined ? { mode: threadSpec.draft.mode } : {}),
+              ...(threadSpec.draft.metadata !== undefined
+                ? { metadata: threadSpec.draft.metadata }
+                : {}),
+            });
+            draftRevision = entry.revision;
+          }
+
+          let firstTurnSent = false;
+          if (threadSpec.firstTurn) {
+            yield* dispatchClientCommand({
+              type: "thread.turn.start",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+              message: {
+                messageId: MessageId.makeUnsafe(crypto.randomUUID()),
+                role: "user",
+                text: threadSpec.firstTurn.text,
+                attachments: [],
+              },
+              provider: threadSpec.firstTurn.provider,
+              model: threadSpec.firstTurn.model ?? threadModel,
+              modelOptions: threadSpec.firstTurn.modelOptions,
+              providerOptions: threadSpec.firstTurn.providerOptions,
+              assistantDeliveryMode: threadSpec.firstTurn.assistantDeliveryMode,
+              runtimeMode: threadSpec.firstTurn.runtimeMode ?? threadSpec.runtimeMode ?? "full-access",
+              interactionMode:
+                threadSpec.firstTurn.interactionMode ??
+                threadSpec.interactionMode ??
+                DEFAULT_PROVIDER_INTERACTION_MODE,
+              createdAt: new Date().toISOString(),
+            });
+            firstTurnSent = true;
+          }
+
+          return {
+            threadId,
+            title: threadSpec.title,
+            created: true,
+            ...(draftRevision !== undefined ? { draftRevision } : {}),
+            firstTurnSent,
+          };
+        }),
+      { concurrency: 1 },
+    );
+
+    yield* publishJhSidebarProjectVisibility({
+      projectId: activeProject.id,
+      workspaceRoot: activeProject.workspaceRoot,
+      expanded: sidebarExpanded,
+    });
+
+    return {
+      ok: true,
+      project: {
+        projectId: activeProject.id,
+        title: activeProject.title,
+        workspaceRoot: activeProject.workspaceRoot,
+        created: projectCreated,
+        sidebarExpanded,
+      },
+      threads: threadResults,
+    };
   });
 
   // HTTP server — serves static files or redirects to Vite dev server
@@ -642,24 +952,6 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
           const threadIdParam = url.searchParams.get("thread_id")?.trim() ?? "";
 
-          const findThread = Effect.fn(function* (input: {
-            threadId: string;
-            projectId?: ProjectId;
-          }) {
-            if (input.threadId.length === 0) {
-              return null;
-            }
-            const snapshot = yield* projectionReadModelQuery.getSnapshot();
-            return (
-              snapshot.threads.find(
-                (thread) =>
-                  thread.id === input.threadId &&
-                  thread.deletedAt === null &&
-                  (input.projectId === undefined || thread.projectId === input.projectId),
-              ) ?? null
-            );
-          });
-
           if (req.method === "GET") {
             if (threadIdParam.length === 0) {
               respond(
@@ -670,7 +962,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               return;
             }
             const normalizedThreadId = ThreadId.makeUnsafe(threadIdParam);
-            const existingThread = yield* findThread({ threadId: normalizedThreadId });
+            const existingThread = yield* findActiveThread({ threadId: normalizedThreadId });
             if (!existingThread) {
               respond(404, commonHeaders, JSON.stringify({ error: "Thread not found." }));
               return;
@@ -698,7 +990,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               respond(400, commonHeaders, JSON.stringify({ error: "Invalid composer prefill body." }));
               return;
             }
-            const existingThread = yield* findThread({
+            const existingThread = yield* findActiveThread({
               threadId: parsedRequestBody.threadId,
               projectId: parsedRequestBody.projectId,
             });
@@ -710,20 +1002,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               );
               return;
             }
-            const entry = yield* upsertJhComposerDraftState({
-              stateDir: serverConfig.stateDir,
-              fileSystem,
-              path,
-              prefill: parsedRequestBody,
-            });
-            yield* pushBus.publishAll(WS_CHANNELS.jhComposerPrefillUpdated, {
-              threadId: entry.threadId,
-              projectId: entry.projectId,
-              draftId: entry.draftId,
-              revision: entry.revision,
-              cleared: false,
-              updatedAt: entry.updatedAt,
-            });
+            const entry = yield* stageJhComposerPrefill(parsedRequestBody);
             respond(
               200,
               commonHeaders,
@@ -771,6 +1050,136 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           }
 
           respond(405, commonHeaders, JSON.stringify({ error: "Method not allowed." }));
+          return;
+        }
+
+        if (url.pathname === JH_SPAWN_ROUTE_PATH) {
+          const commonHeaders = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+          };
+          if (req.method === "OPTIONS") {
+            respond(204, {
+              ...commonHeaders,
+              "Access-Control-Allow-Methods": "POST,OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            });
+            return;
+          }
+
+          if (req.method !== "POST") {
+            respond(405, commonHeaders, JSON.stringify({ error: "Method not allowed." }));
+            return;
+          }
+
+          const requestBodyText = yield* Effect.tryPromise({
+            try: () => readHttpRequestBody(req),
+            catch: () =>
+              new RouteRequestError({
+                message: "Failed to read JH spawn request body.",
+              }),
+          });
+          const parsedRequestBody = decodeJhSpawnRequest(requestBodyText);
+          if (!parsedRequestBody) {
+            respond(400, commonHeaders, JSON.stringify({ error: "Invalid spawn body." }));
+            return;
+          }
+
+          const spawnResult = yield* performJhSpawn(parsedRequestBody);
+          respond(200, commonHeaders, JSON.stringify(spawnResult));
+          return;
+        }
+
+        if (url.pathname === JH_SIDEBAR_PROJECT_ROUTE_PATH) {
+          const commonHeaders = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+          };
+          if (req.method === "OPTIONS") {
+            respond(204, {
+              ...commonHeaders,
+              "Access-Control-Allow-Methods": "POST,OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            });
+            return;
+          }
+
+          if (req.method !== "POST") {
+            respond(405, commonHeaders, JSON.stringify({ error: "Method not allowed." }));
+            return;
+          }
+
+          const requestBodyText = yield* Effect.tryPromise({
+            try: () => readHttpRequestBody(req),
+            catch: () =>
+              new RouteRequestError({
+                message: "Failed to read JH sidebar project request body.",
+              }),
+          });
+          const parsedRequestBody = decodeJhSidebarProjectVisibilityRequest(requestBodyText);
+          if (!parsedRequestBody) {
+            respond(400, commonHeaders, JSON.stringify({ error: "Invalid sidebar project body." }));
+            return;
+          }
+
+          const normalizedWorkspaceRoot =
+            parsedRequestBody.workspaceRoot !== undefined
+              ? yield* normalizeProjectWorkspaceRoot(parsedRequestBody.workspaceRoot)
+              : undefined;
+          const projectById =
+            parsedRequestBody.projectId !== undefined
+              ? yield* findActiveProject({ projectId: parsedRequestBody.projectId })
+              : null;
+          const projectByWorkspace =
+            normalizedWorkspaceRoot !== undefined
+              ? yield* findActiveProject({ workspaceRoot: normalizedWorkspaceRoot })
+              : null;
+          if (projectById && projectByWorkspace && projectById.id !== projectByWorkspace.id) {
+            respond(
+              400,
+              commonHeaders,
+              JSON.stringify({
+                error: "Supplied projectId and workspaceRoot resolve to different active projects.",
+              }),
+            );
+            return;
+          }
+          const resolvedProject = projectById ?? projectByWorkspace;
+          if (!resolvedProject) {
+            respond(404, commonHeaders, JSON.stringify({ error: "Project not found." }));
+            return;
+          }
+
+          const result = yield* publishJhSidebarProjectVisibility({
+            projectId: resolvedProject.id,
+            workspaceRoot: resolvedProject.workspaceRoot,
+            expanded: parsedRequestBody.expanded,
+          });
+          respond(200, commonHeaders, JSON.stringify(result));
+          return;
+        }
+
+        if (
+          yield* tryHandleJhLoopRoute({
+            req,
+            url,
+            jhLoopRuntime,
+            respond,
+            readRequestBody: () =>
+              Effect.tryPromise({
+                try: () => readHttpRequestBody(req),
+                catch: () =>
+                  new RouteRequestError({
+                    message:
+                      req.method === "PATCH"
+                        ? "Failed to read JH loop control request body."
+                        : "Failed to read JH loop create request body.",
+                  }),
+              }),
+          })
+        ) {
           return;
         }
 
@@ -915,8 +1324,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return;
         }
         respond(200, { "Content-Type": contentType }, data);
-      }),
-    ).catch(() => {
+      }).pipe(Effect.provideService(Path.Path, path)),
+    ).catch((error) => {
+      logger.error("http request handler failed", {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
+      });
       if (!res.headersSent) {
         respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
       }
@@ -963,6 +1382,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
+  const jhLoopRuntime = yield* JhLoopRuntimeService;
   const { openInEditor } = yield* Open;
 
   const subscriptionsScope = yield* Scope.make("sequential");
@@ -980,6 +1400,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   ).pipe(Effect.forkIn(subscriptionsScope));
 
   yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
+  yield* Scope.provide(jhLoopRuntime.start, subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
@@ -1072,8 +1493,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { command } = request.body;
-        const normalizedCommand = yield* normalizeDispatchCommand({ command });
-        return yield* orchestrationEngine.dispatch(normalizedCommand);
+        return yield* dispatchClientCommand(command);
       }
 
       case ORCHESTRATION_WS_METHODS.getTurnDiff: {
