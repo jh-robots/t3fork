@@ -1,7 +1,11 @@
 import { ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { buildExpiredTerminalContextToastCopy, deriveComposerSendState } from "./ChatView.logic";
+import {
+  buildExpiredTerminalContextToastCopy,
+  deriveComposerSendState,
+  shouldResetSendPhase,
+} from "./ChatView.logic";
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
@@ -65,5 +69,33 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("shouldResetSendPhase", () => {
+  it("clears a local send phase after a fast turn settles without entering a visible running state", () => {
+    expect(
+      shouldResetSendPhase({
+        sendPhase: "sending-turn",
+        phase: "ready",
+        latestTurnSettled: true,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        hasThreadError: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the send phase while the turn is still unresolved", () => {
+    expect(
+      shouldResetSendPhase({
+        sendPhase: "sending-turn",
+        phase: "ready",
+        latestTurnSettled: false,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        hasThreadError: false,
+      }),
+    ).toBe(false);
   });
 });

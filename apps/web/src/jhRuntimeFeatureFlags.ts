@@ -97,8 +97,7 @@ export function resolveEffectiveJhFeatureFlags(params: {
     mobileTerminalViewport:
       params.overrides.mobileTerminalViewport ?? params.managedDefaults.mobileTerminalViewport,
     mobileFullscreenViewport:
-      params.overrides.mobileFullscreenViewport ??
-      params.managedDefaults.mobileFullscreenViewport,
+      params.overrides.mobileFullscreenViewport ?? params.managedDefaults.mobileFullscreenViewport,
     mobileInAppNotifications:
       params.overrides.mobileInAppNotifications ?? params.managedDefaults.mobileInAppNotifications,
   };

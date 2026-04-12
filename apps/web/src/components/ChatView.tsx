@@ -94,17 +94,17 @@ import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-  import {
-    BotIcon,
-    ChevronDownIcon,
-    ChevronLeftIcon,
-    ChevronRightIcon,
+import {
+  BotIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   ListTodoIcon,
-    LockIcon,
-    LockOpenIcon,
-    XIcon,
-  } from "lucide-react";
+  LockIcon,
+  LockOpenIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -136,10 +136,7 @@ import {
   jhRuntimeFeatureFlagsQueryOptions,
   resolveEffectiveJhFeatureFlags,
 } from "../jhRuntimeFeatureFlags";
-import {
-  clearJhThreadComposerState,
-  fetchJhThreadComposerState,
-} from "../jhComposerPrefill";
+import { clearJhThreadComposerState, fetchJhThreadComposerState } from "../jhComposerPrefill";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -193,6 +190,7 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   SendPhase,
+  shouldResetSendPhase,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { onJhComposerPrefillUpdated } from "../wsNativeApi";
@@ -233,9 +231,7 @@ function buildJhAskUserTestPrompt(): PendingUserInput {
   ];
 
   return {
-    requestId: ApprovalRequestId.makeUnsafe(
-      `${JH_ASK_USER_TEST_REQUEST_ID_PREFIX}-${Date.now()}`,
-    ),
+    requestId: ApprovalRequestId.makeUnsafe(`${JH_ASK_USER_TEST_REQUEST_ID_PREFIX}-${Date.now()}`),
     createdAt: new Date().toISOString(),
     questions,
   };
@@ -2214,14 +2210,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, []);
 
   useEffect(() => {
-    if (sendPhase === "idle") {
-      return;
-    }
     if (
-      phase === "running" ||
-      activePendingApproval !== null ||
-      activePendingUserInput !== null ||
-      activeThread?.error
+      shouldResetSendPhase({
+        sendPhase,
+        phase,
+        latestTurnSettled,
+        hasPendingApproval: activePendingApproval !== null,
+        hasPendingUserInput: activePendingUserInput !== null,
+        hasThreadError: Boolean(activeThread?.error),
+      })
     ) {
       resetSendPhase();
     }
@@ -2229,6 +2226,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activePendingApproval,
     activePendingUserInput,
     activeThread?.error,
+    latestTurnSettled,
     phase,
     resetSendPhase,
     sendPhase,
@@ -2964,7 +2962,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...existing[activePendingUserInput.requestId],
           [questionId]: {
             selectedOptionLabel: optionLabel,
-            customAnswer: existing[activePendingUserInput.requestId]?.[questionId]?.customAnswer ?? "",
+            customAnswer:
+              existing[activePendingUserInput.requestId]?.[questionId]?.customAnswer ?? "",
           },
         },
       }));
@@ -3738,9 +3737,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onTouchEnd={onMessagesTouchEnd}
               onTouchCancel={onMessagesTouchEnd}
             >
-                <MessagesTimeline
-                  key={activeThread.id}
-                  hasMessages={timelineEntries.length > 0}
+              <MessagesTimeline
+                key={activeThread.id}
+                hasMessages={timelineEntries.length > 0}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}
@@ -3756,12 +3755,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
-                  onImageExpand={onExpandTimelineImage}
-                  markdownCwd={gitCwd ?? undefined}
-                  richImageRenderingEnabled={jhRichImageRenderingEnabled}
-                  resolvedTheme={resolvedTheme}
-                  timestampFormat={timestampFormat}
-                  workspaceRoot={activeProject?.cwd ?? undefined}
+                onImageExpand={onExpandTimelineImage}
+                markdownCwd={gitCwd ?? undefined}
+                richImageRenderingEnabled={jhRichImageRenderingEnabled}
+                resolvedTheme={resolvedTheme}
+                timestampFormat={timestampFormat}
+                workspaceRoot={activeProject?.cwd ?? undefined}
               />
             </div>
 
@@ -3832,15 +3831,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     </div>
                   ) : pendingUserInputs.length > 0 ? (
                     <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                        <ComposerPendingUserInputPanel
-                          pendingUserInputs={pendingUserInputs}
-                          respondingRequestIds={respondingRequestIds}
-                          answers={activePendingDraftAnswers}
-                          questionIndex={activePendingQuestionIndex}
-                          enhancedExperienceEnabled={jhAskUserWorkflowEnabled}
-                          onSelectOption={onSelectActivePendingUserInputOption}
-                          onPrevious={onPreviousActivePendingUserInputQuestion}
-                          onAdvance={onAdvanceActivePendingUserInput}
+                      <ComposerPendingUserInputPanel
+                        pendingUserInputs={pendingUserInputs}
+                        respondingRequestIds={respondingRequestIds}
+                        answers={activePendingDraftAnswers}
+                        questionIndex={activePendingQuestionIndex}
+                        enhancedExperienceEnabled={jhAskUserWorkflowEnabled}
+                        onSelectOption={onSelectActivePendingUserInputOption}
+                        onPrevious={onPreviousActivePendingUserInputQuestion}
+                        onAdvance={onAdvanceActivePendingUserInput}
                       />
                     </div>
                   ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -4396,24 +4395,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
             aria-label="Close image preview"
             onClick={closeExpandedImage}
           />
-            {expandedImage.images.length > 1 && (
-              <Button
-                type="button"
-                size="icon"
+          {expandedImage.images.length > 1 && (
+            <Button
+              type="button"
+              size="icon"
               variant="ghost"
               className="absolute left-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:left-6"
               aria-label="Previous image"
               onClick={() => {
                 navigateExpandedImage(-1);
               }}
-              >
-                <ChevronLeftIcon className="size-5" />
-              </Button>
-            )}
-            <div className="relative isolate z-10 max-h-[92vh] max-w-[92vw]">
-              <img
-                src={expandedImageItem.src}
-                alt={expandedImageItem.name}
+            >
+              <ChevronLeftIcon className="size-5" />
+            </Button>
+          )}
+          <div className="relative isolate z-10 max-h-[92vh] max-w-[92vw]">
+            <img
+              src={expandedImageItem.src}
+              alt={expandedImageItem.name}
               className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
               draggable={false}
               onClick={closeExpandedImage}

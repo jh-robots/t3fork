@@ -192,7 +192,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding, orderedOptions, selectOptionAndAutoAdvance, progress.customAnswer.length]);
+  }, [
+    activeQuestion,
+    isResponding,
+    orderedOptions,
+    selectOptionAndAutoAdvance,
+    progress.customAnswer.length,
+  ]);
 
   if (!activeQuestion) {
     return null;

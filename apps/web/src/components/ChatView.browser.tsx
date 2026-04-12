@@ -1586,8 +1586,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       const switchProjectButton = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>('[aria-label="Switch project"]'),
+        () => document.querySelector<HTMLButtonElement>('[aria-label="Switch project"]'),
         "Unable to find project switcher.",
       );
       switchProjectButton.click();
@@ -1603,11 +1602,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       const newThreadId = newThreadPath.slice(1) as ThreadId;
 
-      expect(useComposerDraftStore.getState().getDraftThreadByProjectId("project-2" as ProjectId))
-        .toMatchObject({
-          threadId: newThreadId,
-          projectId: "project-2" as ProjectId,
-        });
+      expect(
+        useComposerDraftStore.getState().getDraftThreadByProjectId("project-2" as ProjectId),
+      ).toMatchObject({
+        threadId: newThreadId,
+        projectId: "project-2" as ProjectId,
+      });
     } finally {
       await mounted.cleanup();
     }
@@ -1880,7 +1880,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(document.querySelector('[data-slot="sheet-popup"][data-sidebar="sidebar"]')).toBeNull();
+          expect(
+            document.querySelector('[data-slot="sheet-popup"][data-sidebar="sidebar"]'),
+          ).toBeNull();
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1888,7 +1890,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const composerEditor = await waitForComposerEditor();
       await vi.waitFor(
         () => {
-          expect(document.activeElement === composerEditor || composerEditor.contains(document.activeElement)).toBe(true);
+          expect(
+            document.activeElement === composerEditor ||
+              composerEditor.contains(document.activeElement),
+          ).toBe(true);
         },
         { timeout: 8_000, interval: 16 },
       );

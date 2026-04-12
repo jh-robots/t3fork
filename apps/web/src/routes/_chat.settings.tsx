@@ -429,10 +429,7 @@ function SettingsRouteView() {
     setBrowserNotificationPermission(getJhBrowserNotificationPermission());
   }, []);
 
-  function setJhFeatureFlagOverride(
-    key: keyof JHFeatureFlags,
-    enabled: boolean,
-  ) {
+  function setJhFeatureFlagOverride(key: keyof JHFeatureFlags, enabled: boolean) {
     updateSettings({
       jhFeatureFlags: resolveJhFeatureFlagOverrides(
         {
@@ -658,8 +655,8 @@ function SettingsRouteView() {
                     }
                     aria-label="Stream assistant messages"
                   />
-                  }
-                />
+                }
+              />
 
               <SettingsRow
                 title="JH ask-user workflow"
@@ -841,7 +838,8 @@ function SettingsRouteView() {
                 <div className="mt-4 border-t border-border pt-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs text-muted-foreground">
-                      Use this to validate the browser permission path before the event-driven MVP is exercised on mobile.
+                      Use this to validate the browser permission path before the event-driven MVP
+                      is exercised on mobile.
                     </p>
                     <Button
                       size="xs"
